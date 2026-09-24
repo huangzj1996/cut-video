@@ -1,0 +1,14 @@
+{
+  "name": "cut-video-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.28.1",
+  "scripts": {
+    "build:packages": "pnpm --filter @cut-video/video-project build && pnpm --filter @cut-video/video-agent build",
+    "typecheck": "pnpm build:packages && pnpm --filter cut-video typecheck",
+    "test": "pnpm build:packages && pnpm --filter cut-video test",
+    "start": "pnpm build:packages && pnpm --filter cut-video start",
+    "build": "pnpm build:packages && pnpm --filter cut-video package",
+    "make": "pnpm build && pnpm --filter cut-video make --skip-package"
+  }
+}

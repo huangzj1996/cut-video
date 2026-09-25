@@ -61,3 +61,8 @@ button {
   scrollbar-width: thin;
   scrollbar-color: #343941 transparent;
 }
+
+.config-range:has(input:focus-visible) {
+  outline: 2px solid var(--accent-red);
+  outline-offset: 3px;
+}

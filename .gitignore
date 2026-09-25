@@ -5,4 +5,10 @@ dist/
 *.log
 
 # Local reference media; add reviewed project assets explicitly when needed.
-apps/desktop/src/renderer/assets/
+apps/desktop/src/renderer/assets/*
+!apps/desktop/src/renderer/assets/song/
+apps/desktop/src/renderer/assets/song/*
+!apps/desktop/src/renderer/assets/song/song.json
+!apps/desktop/src/renderer/assets/music/
+apps/desktop/src/renderer/assets/music/*
+!apps/desktop/src/renderer/assets/music/*.png

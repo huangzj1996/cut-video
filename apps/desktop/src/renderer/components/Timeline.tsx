@@ -13,24 +13,10 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
-
-const durationSeconds = 87;
-const rulerMarks = Array.from({ length: Math.floor(durationSeconds / 10) + 1 }, (_, index) => {
-  const seconds = index * 10;
-  return { seconds, label: `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}` };
-});
-const videoClips = [
-  { label: '分镜01', start: 0.8, end: 15.2, color: 'bg-[#1f6158] border-[#25d0b1]', accent: 'bg-[#25d0b1]' },
-  { label: '分镜02', start: 16.1, end: 29.2, color: 'bg-[#294673] border-[#ffffff20]', accent: 'bg-[#5b8cff]' },
-  { label: '分镜03', start: 30.1, end: 43, color: 'bg-[#503984] border-[#ffffff20]', accent: 'bg-[#8b6af7]' },
-  { label: '分镜04', start: 44, end: 57.7, color: 'bg-[#74313e] border-[#ffffff20]', accent: 'bg-[#f05f73]' },
-  { label: '分镜05', start: 58.7, end: 72.7, color: 'bg-[#3d3f45] border-[#ffffff20]', accent: 'bg-[#a9afba]' },
-];
-
-const waveformBars = ['h-2', 'h-3', 'h-4', 'h-5', 'h-3', 'h-2', 'h-4', 'h-5', 'h-4', 'h-3', 'h-2', 'h-4', 'h-5', 'h-3', 'h-2'];
+import { DURATION_SECONDS, INITIAL_ZOOM, RULER_MARKS, TIMELINE_DISPLAY_TIME, VIDEO_CLIPS, WAVEFORM_BARS, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP } from '../constants/timeline';
 
 function positionAt(seconds: number) {
-  return `${(seconds / durationSeconds) * 100}%`;
+  return `${(seconds / DURATION_SECONDS) * 100}%`;
 }
 
 function clipPosition(start: number, end: number) {
@@ -60,22 +46,22 @@ function TrackLabel({ icon: Icon, title, subtitle }: { icon: LucideIcon; title: 
 function Waveform() {
   return (
     <span className="ml-2 flex h-6 items-center gap-[3px] opacity-60" aria-hidden="true">
-      {waveformBars.map((height, index) => <i key={index} className={`w-[3px] rounded-full bg-[#a3d8ae] ${height}`} />)}
+      {WAVEFORM_BARS.map((height, index) => <i key={index} className={`w-[3px] rounded-full bg-[#a3d8ae] ${height}`} />)}
     </span>
   );
 }
 
 export function Timeline() {
-  const [zoom, setZoom] = useState(1.4);
-  const changeZoom = (change: number) => setZoom((current) => Math.min(2.5, Math.max(1, Math.round((current + change) * 10) / 10)));
-  const zoomProgress = ((zoom - 1) / 1.5) * 100;
+  const [zoom, setZoom] = useState(INITIAL_ZOOM);
+  const changeZoom = (change: number) => setZoom((current) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round((current + change) * 10) / 10)));
+  const zoomProgress = ((zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100;
 
   return (
     <section aria-label="时间线" className="h-[275px] shrink-0 border-t border-[var(--border-subtle)] bg-[#121418]">
       <div className="flex h-[52px] items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] px-5">
         <div className="flex items-center gap-4">
           <h2 className="text-[18px] font-extrabold">时间线</h2>
-          <span className="font-mono text-[14px] font-semibold text-[var(--text-secondary)]">00:00:00 / 00:01:27</span>
+          <span className="font-mono text-[14px] font-semibold text-[var(--text-secondary)]">{TIMELINE_DISPLAY_TIME}</span>
           <div className="flex gap-2"><ToolButton icon={Undo2} label="撤销" /><ToolButton icon={Redo2} label="重做" /></div>
         </div>
         <div className="flex items-center gap-2.5">
@@ -83,14 +69,14 @@ export function Timeline() {
           <ToolButton icon={Magnet} label="吸附" active />
           <ToolButton icon={Link2} label="联动" />
           <ToolButton icon={AudioLines} label="显示波形" />
-          <button type="button" aria-label="缩小时间线" onClick={() => changeZoom(-0.1)} className="ml-1 text-[var(--text-muted)] hover:text-white"><Minus size={15} /></button>
+          <button type="button" aria-label="缩小时间线" onClick={() => changeZoom(-ZOOM_STEP)} className="ml-1 text-[var(--text-muted)] hover:text-white"><Minus size={15} /></button>
           <div className="relative flex h-4 w-[104px] items-center">
             <span className="h-1 w-full rounded-full bg-[#343941]" />
             <span className="pointer-events-none absolute left-0 h-1 rounded-full bg-white" style={{ width: `${zoomProgress}%` }} />
             <span className="pointer-events-none absolute top-[2px] h-3 w-3 -translate-x-1/2 rounded-full bg-white" style={{ left: `${zoomProgress}%` }} />
-            <input aria-label="时间线缩放" type="range" min="1" max="2.5" step="0.1" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} className="absolute inset-0 w-full cursor-pointer opacity-0" />
+            <input aria-label="时间线缩放" type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={ZOOM_STEP} value={zoom} onChange={(event) => setZoom(Number(event.target.value))} className="absolute inset-0 w-full cursor-pointer opacity-0" />
           </div>
-          <button type="button" aria-label="放大时间线" onClick={() => changeZoom(0.1)} className="text-[var(--text-muted)] hover:text-white"><Plus size={15} /></button>
+          <button type="button" aria-label="放大时间线" onClick={() => changeZoom(ZOOM_STEP)} className="text-[var(--text-muted)] hover:text-white"><Plus size={15} /></button>
         </div>
       </div>
 
@@ -105,7 +91,7 @@ export function Timeline() {
         <div aria-label="时间片段" className="thin-scrollbar min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
           <div className="relative h-full" style={{ width: `${zoom * 100}%` }}>
             <div className="relative h-[30px] border-b border-[var(--border-subtle)] bg-[#121418]">
-              {rulerMarks.map(({ seconds, label }) => (
+              {RULER_MARKS.map(({ seconds, label }) => (
                 <div key={seconds} className="absolute top-0 h-full border-l border-[#313741] pl-2 pt-1.5 font-mono text-[10px] whitespace-nowrap text-[var(--text-muted)]" style={{ left: positionAt(seconds) }}>
                   {label}
                 </div>
@@ -113,7 +99,7 @@ export function Timeline() {
             </div>
 
             <div className="relative h-16 border-b border-[var(--border-subtle)] bg-[var(--bg-panel)]">
-              {videoClips.map((clip) => (
+              {VIDEO_CLIPS.map((clip) => (
                 <div key={clip.label} style={clipPosition(clip.start, clip.end)} className={`absolute top-[10px] flex h-[44px] items-center gap-2.5 overflow-hidden rounded-md border px-3 text-[13px] font-semibold whitespace-nowrap ${clip.color}`}>
                   <span className={`h-[17px] w-1 rounded-full ${clip.accent}`} />
                   <span>{clip.label}</span>

@@ -3,7 +3,7 @@
 ## 需求与任务
 
 - [需求文档 v1.1](requirements/花生AI_妙剪Magicut_需求文档_v1.1.md) — 当前基线
-- [任务清单 v1.0](requirements/花生AI_妙剪Magicut_任务清单_v1.0.md) — 21 个任务与验收标准
+- [任务清单 v1.1](requirements/花生AI_妙剪Magicut_任务清单_v1.1.md) — 21 个任务与验收标准
 - [需求文档 v1.0](requirements/花生AI桌面创作工具_需求文档_v1.0.md) — 历史版本
 
 ## 设计

@@ -53,7 +53,7 @@ pnpm make             # 生成 Windows 安装包
 ## 文档
 
 - [需求文档 v1.1](docs/requirements/花生AI_妙剪Magicut_需求文档_v1.1.md)
-- [任务清单 v1.0](docs/requirements/花生AI_妙剪Magicut_任务清单_v1.0.md)
+- [任务清单 v1.1](docs/requirements/花生AI_妙剪Magicut_任务清单_v1.1.md)
 - [需求文档 v1.0（历史）](docs/requirements/花生AI桌面创作工具_需求文档_v1.0.md)
 - [前端原型](docs/design/miaoma-magicut.pen)
 

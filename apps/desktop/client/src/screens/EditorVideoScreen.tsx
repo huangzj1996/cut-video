@@ -148,7 +148,20 @@ const VOICE_BARS: readonly VoiceBar[] = [
 
 const WAVE_HEIGHTS = [8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8];
 
-const TICKS = ['00:00', '00:10', '00:20', '00:30', '00:40', '00:50', '01:00', '01:10', '01:20'];
+const TICKS = [
+  '00:00',
+  '00:10',
+  '00:20',
+  '00:30',
+  '00:40',
+  '00:50',
+  '01:00',
+  '01:10',
+  '01:20',
+  '01:30',
+  '01:40',
+  '01:50',
+];
 
 const ANALYSIS_TEXT = `我来分析你的文稿，这是一份关于“前端AI进阶学习路线”的教学内容，时间线清晰、结构完整。让我先加载制片技能来完成方案设计。
 
@@ -211,7 +224,7 @@ export function EditorVideoScreen() {
   const [contextOpen, setContextOpen] = useState(true);
   const [quickOpen, setQuickOpen] = useState(true);
   const [draft, setDraft] = useState('');
-  const [zoom, setZoom] = useState(58);
+  const [zoom, setZoom] = useState(0);
   const [tools, setTools] = useState<Record<TimelineToolId, boolean>>({
     snap: true,
     link: false,
@@ -225,7 +238,7 @@ export function EditorVideoScreen() {
   const selectedName = selectedClip?.name ?? '分镜 01';
   const selectedRange = selectedClip?.range ?? '00:04-00:08';
   const playheadRatio = Math.min(1, Math.max(0, currentTime / TIMELINE_SPAN_SECONDS));
-  const zoomScale = zoom <= 58 ? 0.75 + (zoom / 58) * 0.25 : 1 + ((zoom - 58) / 42) * 0.8;
+  const zoomScale = 1 + (zoom / 100) * 0.8;
 
   const notify = useCallback((message: string) => {
     setNotice(message);

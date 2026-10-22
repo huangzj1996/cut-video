@@ -927,12 +927,16 @@
 
 .ed-timeline-canvas {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   min-width: 760px;
+  height: 100%;
 }
 
 .ed-ruler {
   display: flex;
+  flex: none;
   height: 30px;
   border-bottom: 1px solid var(--ed-line);
   background: #121418;
@@ -981,6 +985,8 @@
 .ed-track-row {
   display: flex;
   position: relative;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .ed-track-label {
@@ -1024,7 +1030,6 @@
 }
 
 .ed-track-video {
-  height: 64px;
   border-bottom: 1px solid var(--ed-line);
   background: #15171b;
 }
@@ -1034,7 +1039,6 @@
 }
 
 .ed-track-voice {
-  height: 72px;
   border-bottom: 1px solid var(--ed-line);
   background: #101216;
 }
@@ -1044,7 +1048,6 @@
 }
 
 .ed-track-subtitle {
-  height: 102px;
   border-bottom: 1px solid var(--ed-line);
   background: #15171b;
 }
@@ -1053,9 +1056,18 @@
   background: #111318;
 }
 
+.ed-track-music {
+  border-bottom: 1px solid var(--ed-line);
+  background: #101216;
+}
+
+.ed-track-music .ed-track-label {
+  background: #0e1014;
+}
+
 .ed-video-bar {
   position: absolute;
-  top: 11px;
+  top: 50%;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -1063,9 +1075,10 @@
   padding: 0 12px;
   overflow: hidden;
   border: 1px solid;
-  border-radius: 8px;
+  border-radius: 0;
   color: #fff;
   white-space: nowrap;
+  transform: translateY(-50%);
 }
 
 .ed-bar-accent {
@@ -1104,18 +1117,31 @@
 
 .ed-voice-bar {
   position: absolute;
-  top: 18px;
+  top: 50%;
   display: flex;
   gap: 10px;
   align-items: center;
-  height: 44px;
+  height: 42px;
   padding: 0 12px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
+  border-radius: 0;
   background: #245a34;
   color: #fff;
   white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+.ed-video-bar:first-child,
+.ed-voice-bar:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.ed-video-bar:last-child,
+.ed-voice-bar:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
 }
 
 .ed-voice-bar.is-pause {
@@ -1144,7 +1170,7 @@
 
 .ed-subtitle-bar {
   position: absolute;
-  top: 27px;
+  top: 50%;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -1156,6 +1182,7 @@
   background: #6b471e;
   color: #fff;
   white-space: nowrap;
+  transform: translateY(-50%);
 }
 
 .ed-subtitle-bar svg {
@@ -1166,6 +1193,51 @@
 .ed-subtitle-bar span {
   font-size: 13px;
   font-weight: 750;
+}
+
+.ed-tl-music-bar {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  height: 42px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid rgba(91, 140, 255, 0.55);
+  border-radius: 8px;
+  background: #2b3a63;
+  color: #fff;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+.ed-tl-music-bar > svg {
+  flex: none;
+  color: #dce7ff;
+}
+
+.ed-tl-music-name {
+  flex: none;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.ed-tl-music-artist {
+  flex: none;
+  color: #c7d0da;
+  font-size: 11px;
+}
+
+.ed-tl-music-bar .ed-waveform span {
+  background: rgba(220, 231, 255, 0.5);
+}
+
+.ed-tl-music-duration {
+  margin-left: auto;
+  color: #a9afba;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .ed-playhead-layer {

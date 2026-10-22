@@ -96,7 +96,7 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-02',
     label: '分镜02',
-    left: '14.07%',
+    left: '13.17%',
     width: '11.4%',
     background: '#294673',
     border: 'rgba(255,255,255,0.125)',
@@ -105,7 +105,7 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-03',
     label: '分镜03',
-    left: '26.28%',
+    left: '24.57%',
     width: '11.28%',
     background: '#503984',
     border: 'rgba(255,255,255,0.125)',
@@ -114,7 +114,7 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-04',
     label: '分镜04',
-    left: '38.37%',
+    left: '35.85%',
     width: '11.92%',
     background: '#74313e',
     border: 'rgba(255,255,255,0.125)',
@@ -123,7 +123,7 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-05',
     label: '分镜05',
-    left: '51.16%',
+    left: '47.77%',
     width: '12.21%',
     background: '#3d3f45',
     border: 'rgba(255,255,255,0.125)',
@@ -142,8 +142,8 @@ interface VoiceBar {
 
 const VOICE_BARS: readonly VoiceBar[] = [
   { id: 'voice-01', label: 'IndexTTS2 口播', left: '0.7%', width: '24.42%', waveBars: 16 },
-  { id: 'voice-02', label: '停顿', left: '25.81%', width: '3.84%', waveBars: 2, pause: true },
-  { id: 'voice-03', label: '旁白 02', left: '30.23%', width: '19.19%', waveBars: 13 },
+  { id: 'voice-02', label: '停顿', left: '25.12%', width: '3.84%', waveBars: 2, pause: true },
+  { id: 'voice-03', label: '旁白 02', left: '28.96%', width: '19.19%', waveBars: 13 },
 ];
 
 const WAVE_HEIGHTS = [8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8];
@@ -766,6 +766,26 @@ export function EditorVideoScreen() {
                 <div className="ed-subtitle-bar" style={{ left: '0.7%', width: '44.19%' }}>
                   <EditorIcon name="subtitles" size={16} />
                   <span>Whisper 字幕 · 自动断句 · 可逐字微调</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="ed-track-row ed-track-music">
+              <div className="ed-track-label">
+                <EditorIcon name="music" size={18} />
+                <span className="ed-track-meta">
+                  <span className="ed-track-name">音乐</span>
+                  <span className="ed-track-sub">Eutopia · 02:01</span>
+                </span>
+              </div>
+              <div className="ed-track-content">
+                <div className="ed-tl-music-bar" style={{ left: '0.7%', width: '59.28%' }}>
+                  <span className="ed-bar-accent" style={{ background: 'var(--ed-blue)' }} />
+                  <EditorIcon name="music" size={15} />
+                  <span className="ed-tl-music-name">Eutopia</span>
+                  <span className="ed-tl-music-artist">Mika Chen</span>
+                  <Waveform count={12} />
+                  <span className="ed-tl-music-duration">02:01</span>
                 </div>
               </div>
             </div>

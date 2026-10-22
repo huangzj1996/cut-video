@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AppInfo, AppSettings, MediaInfo } from '../../shared/ipc-contract';
 import { IpcClientError, unwrapIpc } from './lib/ipc';
+import { CreateVideoScreen } from './screens/CreateVideoScreen';
 import { EditorVideoScreen } from './screens/EditorVideoScreen';
 
 function formatPlatform(platform: string): string {
@@ -135,6 +136,15 @@ function StatusScreen() {
             <h1>桌面创作工具</h1>
           </div>
           <div className="topbar-actions">
+            <button
+              className="button button-ghost"
+              type="button"
+              onClick={() => {
+                window.location.hash = '#/create';
+              }}
+            >
+              创作页
+            </button>
             <button
               className="button button-ghost"
               type="button"
@@ -345,7 +355,11 @@ function App() {
     return <StatusScreen />;
   }
 
-  return <EditorVideoScreen />;
+  if (hash === '#/editor') {
+    return <EditorVideoScreen />;
+  }
+
+  return <CreateVideoScreen />;
 }
 
 export default App;

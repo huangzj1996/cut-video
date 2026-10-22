@@ -19,9 +19,15 @@ export type EditorIconName =
   | 'minus'
   | 'plus'
   | 'chevron-down'
+  | 'chevron-up'
   | 'arrow-down'
   | 'send'
   | 'close'
+  | 'home'
+  | 'scissors'
+  | 'folder'
+  | 'sparkles'
+  | 'check'
   | 'video-track'
   | 'mic-track'
   | 'subtitle-track';
@@ -140,6 +146,7 @@ const ICON_NODES: Record<EditorIconName, ReactNode> = {
     </>
   ),
   'chevron-down': <path d="m6 9 6 6 6-6" />,
+  'chevron-up': <path d="m18 15-6-6-6 6" />,
   'arrow-down': (
     <>
       <path d="M12 4v12" />
@@ -159,6 +166,34 @@ const ICON_NODES: Record<EditorIconName, ReactNode> = {
       <path d="M18 6 6 18" />
     </>
   ),
+  home: (
+    <>
+      <path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path d="M9 22V12h6v10" />
+    </>
+  ),
+  scissors: (
+    <>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M20 4 8.12 15.88" />
+      <path d="M14.47 14.48 20 20" />
+      <path d="M8.12 8.12 12 12" />
+    </>
+  ),
+  folder: (
+    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+  ),
+  sparkles: (
+    <>
+      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
+      <path d="M5 3v4" />
+      <path d="M19 17v4" />
+      <path d="M3 5h4" />
+      <path d="M17 19h4" />
+    </>
+  ),
+  check: <path d="M20 6 9 17l-5-5" />,
   'video-track': (
     <>
       <rect x="3" y="5" width="18" height="14" rx="2" />

@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Electron Forge / packager 对符号链接布局更敏感，工作区使用 hoisted。
+nodeLinker: hoisted
+
+# pnpm 10 默认不执行依赖构建脚本；这里只放行 Electron/打包所需的依赖。
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - electron-winstaller
+  - '@electron/rebuild'

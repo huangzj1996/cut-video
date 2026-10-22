@@ -1,0 +1,45 @@
+{
+  "name": "@miaoma/desktop",
+  "productName": "妙剪 Magicut",
+  "version": "0.1.0",
+  "private": true,
+  "description": "妙剪 Magicut Electron 桌面应用",
+  "license": "UNLICENSED",
+  "author": "hzj1996",
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "node -e \"const fs=require('node:fs'); for (const dir of ['.vite','client/.vite','out']) fs.rmSync(dir,{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@miaoma/video-agent": "workspace:*",
+    "@miaoma/video-project": "workspace:*",
+    "electron-squirrel-startup": "1.0.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/plugin-vite": "7.11.2",
+    "@electron-forge/shared-types": "7.11.2",
+    "@electron/fuses": "1.8.0",
+    "@types/electron-squirrel-startup": "1.0.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "38.8.6",
+    "electron-winstaller": "5.4.4",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3",
+    "vite": "6.4.5",
+    "vitest": "4.1.12"
+  }
+}

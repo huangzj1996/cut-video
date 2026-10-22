@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@miaoma/video-agent": ["../../packages/video-agent/src/index.ts"],
+      "@miaoma/video-project": ["../../packages/video-project/src/index.ts"]
+    }
+  },
+  "include": [
+    "client/**/*.ts",
+    "client/**/*.tsx",
+    "main/**/*.ts",
+    "preload/**/*.ts",
+    "shared/**/*.ts",
+    "types.d.ts",
+    "forge.config.ts",
+    "vite.*.config.ts"
+  ]
+}

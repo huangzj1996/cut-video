@@ -1,0 +1,21 @@
+node_modules/
+.pnpm-store/
+.vite/
+out/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+
+.env
+.env.*
+!.env.example
+
+# FFmpeg 二进制不提交；开发态回退到系统 PATH，打包时放入 resources/ffmpeg。
+apps/desktop/resources/ffmpeg/*.exe
+apps/desktop/resources/ffmpeg/*.dll
+apps/desktop/resources/ffmpeg/*.so
+apps/desktop/resources/ffmpeg/*.dylib
+apps/desktop/resources/ffmpeg/*.zip

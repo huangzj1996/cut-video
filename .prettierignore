@@ -1,0 +1,9 @@
+node_modules
+.pnpm-store
+.vite
+out
+dist
+coverage
+pnpm-lock.yaml
+docs
+*.pen

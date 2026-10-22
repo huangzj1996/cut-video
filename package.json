@@ -1,0 +1,36 @@
+{
+  "name": "miaoma-magicut",
+  "version": "0.1.0",
+  "private": true,
+  "description": "花生AI（妙剪 Magicut）AI 视频创作桌面工具",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=20.19.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @miaoma/desktop start",
+    "start": "pnpm --filter @miaoma/desktop start",
+    "build": "pnpm --filter @miaoma/desktop package",
+    "package": "pnpm --filter @miaoma/desktop package",
+    "make": "pnpm --filter @miaoma/desktop make",
+    "test": "pnpm -r --if-present test",
+    "test:watch": "pnpm -r --if-present test:watch",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "clean": "pnpm -r --if-present clean"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "20.19.43",
+    "eslint": "10.13.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.0",
+    "vitest": "4.1.12"
+  }
+}

@@ -2,7 +2,7 @@
 
 AI 视频创作桌面工具：本地素材 + 文稿 → 聊天式需求确认 → 四阶段生成（准备、分镜、配音、视频） → 四轨编辑 → 预览 → 导出 16:9 MP4。
 
-当前处于 **T01 工程脚手架** 阶段：Electron + React + TypeScript + Vite + Forge + pnpm workspace，业务功能尚未实现。
+当前处于 **T01 工程脚手架** 阶段：Electron + React + TypeScript + Vite + Forge + pnpm workspace。业务功能尚未实现；已按原型落地「妙剪智能视频编辑器-画面」静态 UI（mock 数据，不含真实预览、时间线编辑与导出）。
 
 ## 项目结构
 

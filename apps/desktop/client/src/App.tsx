@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AppInfo, AppSettings, MediaInfo } from '../../shared/ipc-contract';
 import { IpcClientError, unwrapIpc } from './lib/ipc';
+import { EditorVideoScreen } from './screens/EditorVideoScreen';
 
 function formatPlatform(platform: string): string {
   const labels: Record<string, string> = {
@@ -20,7 +21,7 @@ function formatError(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
 }
 
-function App() {
+function StatusScreen() {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [mediaInfo, setMediaInfo] = useState<MediaInfo | null>(null);
@@ -134,6 +135,15 @@ function App() {
             <h1>桌面创作工具</h1>
           </div>
           <div className="topbar-actions">
+            <button
+              className="button button-ghost"
+              type="button"
+              onClick={() => {
+                window.location.hash = '#/editor';
+              }}
+            >
+              编辑器画面
+            </button>
             <button className="button button-ghost" type="button" onClick={() => void handlePing()}>
               测试 IPC
             </button>
@@ -308,6 +318,34 @@ function App() {
       </main>
     </div>
   );
+}
+
+function useHashRoute(): string {
+  const [hash, setHash] = useState(() => window.location.hash);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setHash(window.location.hash);
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
+
+  return hash;
+}
+
+function App() {
+  const hash = useHashRoute();
+
+  if (hash === '#/status') {
+    return <StatusScreen />;
+  }
+
+  return <EditorVideoScreen />;
 }
 
 export default App;

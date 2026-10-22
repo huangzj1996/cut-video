@@ -1,0 +1,293 @@
+/* 字幕设置面板样式：依据 Pen frame 节点 Z87wb0。 */
+
+.ed-subtitle-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px 16px 16px;
+  overflow-y: auto;
+  background: #111214;
+}
+
+.ed-subtitle-header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.ed-subtitle-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ed-subtitle-title {
+  margin: 0;
+  color: var(--ed-text);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 29px;
+  letter-spacing: -0.01em;
+}
+
+.ed-subtitle-description {
+  margin: 0;
+  color: var(--ed-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ed-subtitle-switch-row {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding-top: 13px;
+}
+
+.ed-subtitle-switch-label {
+  color: var(--ed-text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ed-subtitle-switch {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: #30343c;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.ed-subtitle-switch.is-on {
+  background: var(--ed-red);
+}
+
+.ed-subtitle-switch:hover {
+  filter: brightness(1.08);
+}
+
+.ed-subtitle-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 160ms ease;
+}
+
+.ed-subtitle-switch.is-on .ed-subtitle-switch-knob {
+  transform: translateX(20px);
+}
+
+.ed-subtitle-body {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.ed-subtitle-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #30343c;
+  border-radius: 14px;
+  background: #1a1c20;
+}
+
+.ed-subtitle-size-card {
+  min-height: 116px;
+}
+
+.ed-subtitle-style-card {
+  min-height: 142px;
+}
+
+.ed-subtitle-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 20px;
+}
+
+.ed-subtitle-card-title {
+  margin: 0;
+  color: var(--ed-text);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 20px;
+}
+
+.ed-subtitle-value {
+  color: var(--ed-text);
+  font-family: var(--ed-mono);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ed-subtitle-slider-row {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+}
+
+.ed-subtitle-slider {
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ed-subtitle-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ed-subtitle-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    #fff 0 var(--subtitle-progress, 45%),
+    #30343c var(--subtitle-progress, 45%) 100%
+  );
+}
+
+.ed-subtitle-slider::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  appearance: none;
+  background: #fff;
+  box-shadow: 0 0 0 1px #0e0f12;
+}
+
+.ed-subtitle-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: #30343c;
+}
+
+.ed-subtitle-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 9999px;
+  background: #fff;
+}
+
+.ed-subtitle-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #0e0f12;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.ed-subtitle-presets {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 43px;
+}
+
+.ed-subtitle-preset {
+  display: grid;
+  flex: none;
+  width: 32px;
+  height: 36px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--preset-border, #343841);
+  border-radius: 8px;
+  background: var(--preset-bg, #111214);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.ed-subtitle-preset.is-active {
+  border-color: var(--ed-red);
+  background: #0d201b;
+}
+
+.ed-subtitle-preset:not(.is-active):not(:disabled):hover {
+  border-color: #5a5e66;
+}
+
+.ed-subtitle-preset:disabled {
+  cursor: not-allowed;
+}
+
+.ed-subtitle-preset-glyph {
+  color: var(--preset-color);
+  font-family: var(--ed-sans);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  -webkit-text-stroke: 1.5px var(--preset-outline);
+}
+
+.ed-subtitle-preset-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 17px;
+}
+
+.ed-subtitle-preset-name {
+  color: var(--ed-text);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 17px;
+}
+
+.ed-subtitle-apply {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ed-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ed-subtitle-apply:hover:not(:disabled) {
+  color: var(--ed-text);
+}
+
+.ed-subtitle-apply:disabled {
+  cursor: not-allowed;
+}
+
+.ed-subtitle-panel.is-disabled .ed-subtitle-card {
+  opacity: 0.45;
+}

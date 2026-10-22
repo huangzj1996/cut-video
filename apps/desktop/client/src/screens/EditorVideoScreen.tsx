@@ -6,6 +6,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from 'react';
 import { EditorIcon, type EditorIconName } from './editor-icons';
+import { MusicPanel } from './panels/MusicPanel';
+import { SubtitlePanel } from './panels/SubtitlePanel';
+import { VoicePanel } from './panels/VoicePanel';
 import './editor-video.css';
 
 const TOTAL_SECONDS = 87;
@@ -158,8 +161,10 @@ const ANALYSIS_TEXT = `我来分析你的文稿，这是一份关于“前端AI�
 •  三个月学习路线详解（0:55-2:45）
 •  收尾总结（2:45-3:05）`;
 
+type EditorRailId = 'video' | 'voice' | 'subtitle' | 'music';
+
 type RailItem = {
-  id: string;
+  id: EditorRailId;
   label: string;
   icon: EditorIconName;
 };
@@ -200,6 +205,7 @@ function Waveform({ count }: { count: number }) {
 
 export function EditorVideoScreen() {
   const [selectedClipId, setSelectedClipId] = useState('scene-02');
+  const [activeRail, setActiveRail] = useState<EditorRailId>('video');
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [contextOpen, setContextOpen] = useState(true);
@@ -423,117 +429,142 @@ export function EditorVideoScreen() {
           </div>
         </section>
 
-        <aside className="ed-right" aria-label="画面调整">
-          <div className="ed-right-date">6月10日 17:42</div>
+        <aside
+          className="ed-right"
+          aria-label={
+            activeRail === 'video'
+              ? '画面调整'
+              : activeRail === 'voice'
+                ? '口播设置'
+                : activeRail === 'subtitle'
+                  ? '字幕设置'
+                  : '音乐设置'
+          }
+        >
+          {activeRail === 'video' ? (
+            <>
+              <div className="ed-right-date">6月10日 17:42</div>
 
-          <div className="ed-right-scroll" ref={scrollRef}>
-            <div className="ed-context">
-              <div className="ed-context-head">
-                <span className="ed-context-title">0:00-0:25 开场问题</span>
-                <button
-                  className="ed-context-toggle"
-                  type="button"
-                  aria-expanded={contextOpen}
-                  aria-label={contextOpen ? '收起上下文' : '展开上下文'}
-                  onClick={() => setContextOpen((value) => !value)}
-                >
-                  <EditorIcon name="chevron-down" size={17} />
-                </button>
-              </div>
+              <div className="ed-right-scroll-wrap">
+                <div className="ed-right-scroll" ref={scrollRef}>
+                  <div className="ed-context">
+                    <div className="ed-context-head">
+                      <span className="ed-context-title">0:00-0:25 开场问题</span>
+                      <button
+                        className="ed-context-toggle"
+                        type="button"
+                        aria-expanded={contextOpen}
+                        aria-label={contextOpen ? '收起上下文' : '展开上下文'}
+                        onClick={() => setContextOpen((value) => !value)}
+                      >
+                        <EditorIcon name="chevron-down" size={17} />
+                      </button>
+                    </div>
 
-              {contextOpen ? (
-                <>
-                  <p className="ed-context-summary">
-                    {
-                      '大家好，很多前端同学现在都在焦虑一件事：\nAI到底应该怎么学。我先问一下大家，如果...'
-                    }
-                  </p>
-                  <div className="ed-context-divider" />
-                  <div className="ed-context-tags">
-                    <div className="ed-tag-row">
-                      <span className="ed-tag ed-tag-label">视频画面</span>
-                      <span className="ed-tag ed-tag-value">智能匹配素材</span>
-                    </div>
-                    <div className="ed-tag-row">
-                      <span className="ed-tag ed-tag-label">旁白配音</span>
-                      <span className="ed-tag ed-tag-value">温婉学姐</span>
-                    </div>
-                    <div className="ed-tag-row">
-                      <span className="ed-tag ed-tag-label">创作倾向</span>
-                      <span className="ed-tag ed-tag-value">AI智能创作（默认）</span>
-                    </div>
+                    {contextOpen ? (
+                      <>
+                        <p className="ed-context-summary">
+                          {
+                            '大家好，很多前端同学现在都在焦虑一件事：\nAI到底应该怎么学。我先问一下大家，如果...'
+                          }
+                        </p>
+                        <div className="ed-context-divider" />
+                        <div className="ed-context-tags">
+                          <div className="ed-tag-row">
+                            <span className="ed-tag ed-tag-label">视频画面</span>
+                            <span className="ed-tag ed-tag-value">智能匹配素材</span>
+                          </div>
+                          <div className="ed-tag-row">
+                            <span className="ed-tag ed-tag-label">旁白配音</span>
+                            <span className="ed-tag ed-tag-value">温婉学姐</span>
+                          </div>
+                          <div className="ed-tag-row">
+                            <span className="ed-tag ed-tag-label">创作倾向</span>
+                            <span className="ed-tag ed-tag-value">AI智能创作（默认）</span>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
                   </div>
-                </>
-              ) : null}
-            </div>
 
-            <p className="ed-analysis">{ANALYSIS_TEXT}</p>
+                  <p className="ed-analysis">{ANALYSIS_TEXT}</p>
+                </div>
 
-            <button className="ed-scroll-bottom" type="button" onClick={scrollToBottom}>
-              <EditorIcon name="arrow-down" size={15} />
-              回到底部
-            </button>
-          </div>
-
-          <div className={`ed-quick${quickOpen ? '' : ' is-collapsed'}`}>
-            <div className="ed-quick-head">
-              <span>快捷调整</span>
-              <button
-                className="ed-quick-toggle"
-                type="button"
-                aria-expanded={quickOpen}
-                aria-label={quickOpen ? '收起快捷调整' : '展开快捷调整'}
-                onClick={() => setQuickOpen((value) => !value)}
-              >
-                <EditorIcon name="chevron-down" size={18} />
-              </button>
-            </div>
-
-            {quickOpen ? (
-              <div className="ed-quick-box">
-                <input
-                  className="ed-quick-input"
-                  value={draft}
-                  placeholder="输入你的任何想法"
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      sendDraft();
-                    }
-                  }}
-                />
-
-                <div className="ed-quick-actions">
-                  <span className="ed-quick-chip">
-                    <EditorIcon name="link" size={14} />
-                    {selectedName}
-                    <button
-                      className="ed-quick-unlink"
-                      type="button"
-                      aria-label="解除分镜关联"
-                      onClick={() => notify('解除关联将在 T20 实现。')}
-                    >
-                      <EditorIcon name="close" size={12} />
-                    </button>
-                  </span>
-                  <button
-                    className="ed-quick-send"
-                    type="button"
-                    aria-label="发送快捷调整"
-                    onClick={sendDraft}
-                  >
-                    <EditorIcon name="send" size={19} />
+                <div className="ed-scroll-bottom-bar">
+                  <button className="ed-scroll-bottom" type="button" onClick={scrollToBottom}>
+                    <EditorIcon name="arrow-down" size={15} />
+                    回到底部
                   </button>
                 </div>
               </div>
-            ) : null}
-          </div>
+
+              <div className={`ed-quick${quickOpen ? '' : ' is-collapsed'}`}>
+                <div className="ed-quick-head">
+                  <span>快捷调整</span>
+                  <button
+                    className="ed-quick-toggle"
+                    type="button"
+                    aria-expanded={quickOpen}
+                    aria-label={quickOpen ? '收起快捷调整' : '展开快捷调整'}
+                    onClick={() => setQuickOpen((value) => !value)}
+                  >
+                    <EditorIcon name="chevron-down" size={18} />
+                  </button>
+                </div>
+
+                {quickOpen ? (
+                  <div className="ed-quick-box">
+                    <input
+                      className="ed-quick-input"
+                      value={draft}
+                      placeholder="输入你的任何想法"
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          sendDraft();
+                        }
+                      }}
+                    />
+
+                    <div className="ed-quick-actions">
+                      <span className="ed-quick-chip">
+                        <EditorIcon name="link" size={14} />
+                        {selectedName}
+                        <button
+                          className="ed-quick-unlink"
+                          type="button"
+                          aria-label="解除分镜关联"
+                          onClick={() => notify('解除关联将在 T20 实现。')}
+                        >
+                          <EditorIcon name="close" size={12} />
+                        </button>
+                      </span>
+                      <button
+                        className="ed-quick-send"
+                        type="button"
+                        aria-label="发送快捷调整"
+                        onClick={sendDraft}
+                      >
+                        <EditorIcon name="send" size={19} />
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : activeRail === 'voice' ? (
+            <VoicePanel onNotify={notify} />
+          ) : activeRail === 'subtitle' ? (
+            <SubtitlePanel onNotify={notify} />
+          ) : (
+            <MusicPanel onNotify={notify} />
+          )}
         </aside>
 
         <nav className="ed-rail" aria-label="编辑器面板">
           {RAIL_ITEMS.map((item) => {
-            const active = item.id === 'video';
+            const active = item.id === activeRail;
 
             return (
               <button
@@ -541,11 +572,7 @@ export function EditorVideoScreen() {
                 className={`ed-rail-item${active ? ' is-active' : ''}`}
                 type="button"
                 aria-current={active ? 'page' : undefined}
-                onClick={() => {
-                  if (!active) {
-                    notify(`${item.label}面板将在 T17 实现。`);
-                  }
-                }}
+                onClick={() => setActiveRail(item.id)}
               >
                 <EditorIcon name={item.icon} size={20} />
                 <span>{item.label}</span>

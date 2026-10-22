@@ -443,6 +443,14 @@
   text-align: center;
 }
 
+.ed-right-scroll-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .ed-right-scroll {
   display: flex;
   flex: 1;
@@ -559,18 +567,25 @@
   white-space: pre-wrap;
 }
 
+.ed-scroll-bottom-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  background: linear-gradient(to top, #111214 45%, rgba(17, 18, 20, 0));
+}
+
 .ed-scroll-bottom {
   display: inline-flex;
-  flex: none;
-  align-self: center;
   align-items: center;
   gap: 8px;
   height: 32px;
-  margin: 14px 0 12px;
   padding: 0 14px;
   border: 0;
   border-radius: 9999px;
   background: #2b2d31;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
   color: var(--ed-text-2);
   font-size: 12px;
   font-weight: 700;

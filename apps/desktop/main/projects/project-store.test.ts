@@ -108,6 +108,31 @@ describe('ProjectStore', () => {
     ]);
   });
 
+  it('creates a project with initial assets', () => {
+    const assets = {
+      music: [],
+      subtitles: [],
+      thumbnails: [],
+      videos: [
+        {
+          durationMs: 1000,
+          fps: 30,
+          height: 1080,
+          id: 'asset-video-1',
+          mediaType: 'video' as const,
+          path: 'C:/media/clip.mp4',
+          thumbnailIds: [],
+          width: 1920,
+        },
+      ],
+      voices: [],
+    };
+
+    const created = store.create({ name: '带素材项目' }, { assets });
+
+    expect(store.get(created.project.projectId).assets).toEqual(assets);
+  });
+
   it('deletes a project directory', () => {
     const created = store.create({ name: '待删除' });
 

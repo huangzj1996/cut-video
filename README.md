@@ -2,7 +2,7 @@
 
 AI 视频创作桌面工具：本地素材 + 文稿 → 聊天式需求确认 → 四阶段生成（准备、分镜、配音、视频） → 四轨编辑 → 预览 → 导出 16:9 MP4。
 
-当前处于 **T01 工程脚手架** 阶段：Electron + React + TypeScript + Vite + Forge + pnpm workspace。已按原型落地创作页、工作台、创作消息页，以及编辑器「画面 / 口播 / 字幕 / 音乐」四个静态视图；工作台已接入项目文件 IPC（列表 / 创建 / 删除），创作消息页与编辑器仍为 mock 数据，不含真实 AI、预览、时间线编辑与导出。
+当前处于 **T01 工程脚手架** 阶段：Electron + React + TypeScript + Vite + Forge + pnpm workspace。已按原型落地创作页、工作台、创作消息页，以及编辑器「画面 / 口播 / 字幕 / 音乐」四个静态视图；工作台已接入项目文件 IPC（列表 / 创建 / 删除），创作页已接入素材路径扫描与视频元数据解析（创建时执行），创作消息页与编辑器仍为 mock 数据，不含真实 AI、预览、时间线编辑与导出。
 
 ## 项目结构
 
@@ -65,6 +65,7 @@ pnpm make             # 生成 Windows 安装包
 - IPC 通道：`project:list`、`project:get`、`project:create`、`project:update`、`project:delete`。
 - 写入使用临时文件 + rename；项目 ID 经过白名单校验，所有操作限制在工程根目录内。
 - 主进程只返回结构化 `IpcResponse`，不向渲染进程暴露文件路径、原始异常或 `ipcRenderer`。
+- 创作页可输入本机视频素材目录或文件路径；点击创建时扫描并按 ffprobe 解析时长 / fps / 分辨率，写入 `ProjectAssets` 与 `inputs/assets.json`。ffprobe 未配置时创建会返回明确错误。
 
 ## 文档
 

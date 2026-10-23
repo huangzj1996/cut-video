@@ -14,6 +14,8 @@ import {
   type IpcResult,
   type MediaInfo,
 } from '../shared/ipc-contract';
+import { buildAssetSelectionManifest, prepareProjectAssets } from './assets/project-assets';
+import { probeVideo } from './assets/video-probe';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { resolveMediaBinary } from './media/ffmpeg-path';
 import { ProjectStore } from './projects/project-store';
@@ -56,6 +58,15 @@ function buildMediaInfo(): MediaInfo {
     ffmpegExists: isBinaryAvailable(ffmpegPath),
     ffprobeExists: isBinaryAvailable(ffprobePath),
   };
+}
+
+function resolveFfprobeExecutable(): string {
+  return resolveMediaBinary({
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    name: 'ffprobe',
+  });
 }
 
 function getProjectStore(): ProjectStore {
@@ -113,9 +124,52 @@ function registerIpcHandlers(): void {
 
   handle(IPC_CHANNELS.project.list, () => getProjectStore().list());
   handle(IPC_CHANNELS.project.get, (projectId) => getProjectStore().get(projectId));
-  handle(IPC_CHANNELS.project.create, (input) => getProjectStore().create(input));
   handle(IPC_CHANNELS.project.update, (input) => getProjectStore().update(input));
   handle(IPC_CHANNELS.project.delete, (projectId) => getProjectStore().delete(projectId));
+
+  handle(IPC_CHANNELS.project.create, async (input) => {
+    const assetPath = (input as { assetPath?: unknown } | undefined)?.assetPath;
+
+    if (assetPath !== undefined && typeof assetPath !== 'string') {
+      throw new IpcError('ASSET_INVALID_ARGUMENT', '素材路径无效。');
+    }
+
+    const trimmedAssetPath = typeof assetPath === 'string' ? assetPath.trim() : '';
+    let prepared: Awaited<ReturnType<typeof prepareProjectAssets>> | undefined;
+
+    if (trimmedAssetPath) {
+      const ffprobePath = resolveFfprobeExecutable();
+
+      if (!isBinaryAvailable(ffprobePath)) {
+        throw new IpcError('ASSET_PROBE_UNAVAILABLE', '未找到 ffprobe，暂时无法解析视频元数据。');
+      }
+
+      prepared = await prepareProjectAssets(trimmedAssetPath, (candidate) =>
+        probeVideo(ffprobePath, candidate.path),
+      );
+    }
+
+    const projectStore = getProjectStore();
+    const project = projectStore.create(input, prepared ? { assets: prepared.assets } : undefined);
+
+    if (prepared) {
+      try {
+        projectStore.writeAssetManifest(
+          project.project.projectId,
+          buildAssetSelectionManifest(project.project.projectId, prepared),
+        );
+      } catch (error) {
+        try {
+          projectStore.delete(project.project.projectId);
+        } catch {
+          // 回滚失败时保留原始错误。
+        }
+        throw error;
+      }
+    }
+
+    return project;
+  });
 }
 
 function createWindow(): void {

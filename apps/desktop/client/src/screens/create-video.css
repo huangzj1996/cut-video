@@ -611,6 +611,69 @@
   height: 16px;
 }
 
+/* Local video asset path */
+
+.cr-assets {
+  position: absolute;
+  top: 313px;
+  left: 340px;
+  right: 160px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 45px;
+  min-width: 0;
+}
+
+.cr-assets-input {
+  flex: 1;
+  min-width: 0;
+  height: 45px;
+  padding: 0 14px;
+  border: 1px solid #3b3948;
+  border-radius: 14px;
+  background: #26262e;
+  color: #f5f7fa;
+  font-family: var(--cr-sans);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.cr-assets-input::placeholder {
+  color: #74727e;
+}
+
+.cr-assets-input:focus {
+  border-color: #8b6af7;
+  outline: none;
+}
+
+.cr-assets-input:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.cr-assets-clear {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #bf40ff;
+  font-family: var(--cr-sans);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cr-assets-clear:hover:not(:disabled) {
+  color: #d989ff;
+}
+
+.cr-assets-clear:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 /* Create action */
 
 .cr-create {
@@ -710,6 +773,15 @@
   .cr-content {
     width: calc(100% - 96px);
     margin: auto;
+  }
+
+  .cr-assets {
+    left: 320px;
+    right: 150px;
+  }
+
+  .cr-assets-input {
+    font-size: 14px;
   }
 
   .cr-title-line {

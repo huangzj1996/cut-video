@@ -30,6 +30,7 @@ export function CreateVideoScreen() {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [assetPath, setAssetPath] = useState('');
   const voiceRef = useRef<HTMLDivElement>(null);
   const noticeTimer = useRef<number | null>(null);
 
@@ -92,7 +93,12 @@ export function CreateVideoScreen() {
     try {
       if (window.miaoma?.project) {
         const name = trimmed.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '未命名创作';
-        unwrapIpc(await window.miaoma.project.create({ name }));
+        unwrapIpc(
+          await window.miaoma.project.create({
+            assetPath: assetPath.trim() || undefined,
+            name,
+          }),
+        );
       }
 
       window.location.hash = '#/create-chat';
@@ -101,7 +107,7 @@ export function CreateVideoScreen() {
     } finally {
       setCreating(false);
     }
-  }, [creating, notify, script]);
+  }, [assetPath, creating, notify, script]);
 
   return (
     <div className="create-screen">
@@ -194,6 +200,29 @@ export function CreateVideoScreen() {
 
             <div aria-live="polite" className="cr-counter" id="cr-script-count">
               {script.length} / {MAX_SCRIPT_LENGTH}
+            </div>
+
+            <div className="cr-assets">
+              <input
+                aria-label="本机视频素材路径"
+                className="cr-assets-input"
+                disabled={creating}
+                onChange={(event) => setAssetPath(event.target.value)}
+                placeholder="输入本机视频素材目录或文件路径"
+                spellCheck={false}
+                type="text"
+                value={assetPath}
+              />
+              {assetPath.trim() ? (
+                <button
+                  className="cr-assets-clear"
+                  disabled={creating}
+                  type="button"
+                  onClick={() => setAssetPath('')}
+                >
+                  清空
+                </button>
+              ) : null}
             </div>
 
             <div className="cr-voice" ref={voiceRef}>

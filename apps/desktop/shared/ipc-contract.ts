@@ -43,6 +43,7 @@ export interface ProjectSummary {
 }
 
 export interface ProjectCreateInput {
+  assetPath?: string;
   name: string;
 }
 
@@ -69,7 +70,14 @@ export type IpcErrorCode =
   | 'PROJECT_READ_FAILED'
   | 'PROJECT_WRITE_FAILED'
   | 'PROJECT_DELETE_FAILED'
-  | 'PROJECT_LIST_FAILED';
+  | 'PROJECT_LIST_FAILED'
+  | 'ASSET_INVALID_ARGUMENT'
+  | 'ASSET_SCAN_FAILED'
+  | 'ASSET_PATH_NOT_FOUND'
+  | 'ASSET_NO_VIDEOS'
+  | 'ASSET_PROBE_FAILED'
+  | 'ASSET_PROBE_UNAVAILABLE'
+  | 'ASSET_MANIFEST_WRITE_FAILED';
 
 export interface IpcErrorPayload {
   code: IpcErrorCode;

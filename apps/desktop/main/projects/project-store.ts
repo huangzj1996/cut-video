@@ -12,6 +12,7 @@ import path from 'node:path';
 import {
   PROJECT_SCHEMA_VERSION,
   StoredProjectSchema,
+  type ProjectAssets,
   type StoredProject,
 } from '@miaoma/video-project';
 import type {
@@ -20,6 +21,7 @@ import type {
   ProjectSummary,
   ProjectUpdateInput,
 } from '../../shared/ipc-contract';
+import type { AssetSelectionManifest } from '../assets/asset-manifest';
 import { IpcError } from '../ipc-error';
 
 const PROJECT_DIRECTORY_FILE = 'project.json';
@@ -54,15 +56,24 @@ function toSummary(project: StoredProject): ProjectSummary {
   };
 }
 
-function createDraftProject(projectId: string, name: string, now: string): StoredProject {
+function createEmptyAssets(): ProjectAssets {
   return {
-    assets: {
-      music: [],
-      subtitles: [],
-      thumbnails: [],
-      videos: [],
-      voices: [],
-    },
+    music: [],
+    subtitles: [],
+    thumbnails: [],
+    videos: [],
+    voices: [],
+  };
+}
+
+function createDraftProject(
+  projectId: string,
+  name: string,
+  now: string,
+  assets: ProjectAssets = createEmptyAssets(),
+): StoredProject {
+  return {
+    assets,
     canvas: {
       aspectRatio: '16:9',
       fps: 30,
@@ -143,10 +154,15 @@ export class ProjectStore {
     return this.readProject(this.parseProjectId(rawProjectId));
   }
 
-  create(rawInput: ProjectCreateInput): StoredProject {
+  create(rawInput: ProjectCreateInput, options: { assets?: ProjectAssets } = {}): StoredProject {
     const name = this.parseProjectName((rawInput as { name?: unknown } | undefined)?.name);
     const now = new Date().toISOString();
-    const project = createDraftProject(randomUUID(), name, now);
+    const project = createDraftProject(
+      randomUUID(),
+      name,
+      now,
+      options.assets ?? createEmptyAssets(),
+    );
 
     this.writeProject(project.project.projectId, project);
     return project;
@@ -205,6 +221,38 @@ export class ProjectStore {
     }
 
     return { deleted: true, projectId };
+  }
+
+  /**
+   * 持久化创建页选中的素材清单。清单只供主进程/后续探测使用，
+   * 不通过 IPC 返回给渲染进程。
+   */
+  writeAssetManifest(projectId: string, manifest: AssetSelectionManifest): void {
+    const directory = this.projectDirectory(projectId);
+
+    if (!existsSync(path.join(directory, PROJECT_DIRECTORY_FILE))) {
+      throw new IpcError('PROJECT_NOT_FOUND', '项目不存在。');
+    }
+
+    const inputsDirectory = path.join(directory, 'inputs');
+    const target = path.join(inputsDirectory, 'assets.json');
+    const temporary = path.join(inputsDirectory, `.assets.json.${randomUUID()}.tmp`);
+
+    try {
+      mkdirSync(inputsDirectory, { recursive: true });
+      writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, {
+        encoding: 'utf8',
+        flag: 'wx',
+      });
+      renameSync(temporary, target);
+    } catch {
+      try {
+        rmSync(temporary, { force: true });
+      } catch {
+        // 清理失败不影响主错误。
+      }
+      throw new IpcError('ASSET_MANIFEST_WRITE_FAILED', '保存素材清单失败。', true);
+    }
   }
 
   private readProject(projectId: string): StoredProject {

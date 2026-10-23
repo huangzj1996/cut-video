@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ProjectSummary } from '../../../shared/ipc-contract';
 import brandMarkUrl from '../assets/brand-mark.png';
 import projectAiAdvancedUrl from '../assets/workspace/project-ai-advanced.jpg';
 import projectAiLearningUrl from '../assets/workspace/project-ai-learning.jpg';
@@ -7,6 +8,7 @@ import projectCityVlogUrl from '../assets/workspace/project-city-vlog.jpg';
 import projectGameTrailerUrl from '../assets/workspace/project-game-trailer.jpg';
 import projectLivestreamUrl from '../assets/workspace/project-livestream.jpg';
 import projectSaasLaunchUrl from '../assets/workspace/project-saas-launch.jpg';
+import { unwrapIpc } from '../lib/ipc';
 import { EditorIcon } from './editor-icons';
 import './workspace.css';
 
@@ -17,47 +19,57 @@ interface ProjectItem {
   title: string;
 }
 
-const PROJECTS: readonly ProjectItem[] = [
+const COVERS = [
+  projectAiAdvancedUrl,
+  projectAiLearningUrl,
+  projectLivestreamUrl,
+  projectSaasLaunchUrl,
+  projectCeoInterviewUrl,
+  projectCityVlogUrl,
+  projectGameTrailerUrl,
+] as const;
+
+const DEMO_PROJECTS: readonly ProjectItem[] = [
   {
     coverUrl: projectAiAdvancedUrl,
     createdAt: '2026-06-10',
-    id: 'ai-advanced',
+    id: 'demo-ai-advanced',
     title: '前端AI进阶路线：3个月从调接口到架构师',
   },
   {
     coverUrl: projectAiLearningUrl,
     createdAt: '2026-06-10',
-    id: 'ai-learning',
+    id: 'demo-ai-learning',
     title: '前端AI学习路线：从调接口到50K架构师的3个月进阶攻略',
   },
   {
     coverUrl: projectLivestreamUrl,
     createdAt: '2026-06-11',
-    id: 'livestream',
+    id: 'demo-livestream',
     title: '618直播高光混剪：从长视频自动提炼爆点',
   },
   {
     coverUrl: projectSaasLaunchUrl,
     createdAt: '2026-06-12',
-    id: 'saas-launch',
+    id: 'demo-saas-launch',
     title: 'SaaS新功能发布短片：一分钟讲清核心卖点',
   },
   {
     coverUrl: projectCeoInterviewUrl,
     createdAt: '2026-06-09',
-    id: 'ceo-interview',
+    id: 'demo-ceo-interview',
     title: 'CEO访谈精剪版：品牌故事与团队幕后',
   },
   {
     coverUrl: projectCityVlogUrl,
     createdAt: '2026-06-08',
-    id: 'city-vlog',
+    id: 'demo-city-vlog',
     title: '周末城市咖啡探店：生活方式短片模板',
   },
   {
     coverUrl: projectGameTrailerUrl,
     createdAt: '2026-06-07',
-    id: 'game-trailer',
+    id: 'demo-game-trailer',
     title: '独立游戏实机预告：节奏卡点与字幕包装',
   },
 ];
@@ -66,12 +78,32 @@ const GO_EDITOR = () => {
   window.location.hash = '#/editor';
 };
 
-interface ProjectCardProps {
-  project: ProjectItem;
-  onNotify: (message: string) => void;
+function coverFor(projectId: string): string {
+  let hash = 0;
+
+  for (const character of projectId) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+
+  return COVERS[hash % COVERS.length]!;
 }
 
-function ProjectCard({ project, onNotify }: ProjectCardProps) {
+function toProjectItem(summary: ProjectSummary): ProjectItem {
+  return {
+    coverUrl: coverFor(summary.projectId),
+    createdAt: summary.createdAt.slice(0, 10),
+    id: summary.projectId,
+    title: summary.name,
+  };
+}
+
+interface ProjectCardProps {
+  onDelete: (project: ProjectItem) => void;
+  onNotify: (message: string) => void;
+  project: ProjectItem;
+}
+
+function ProjectCard({ onDelete, onNotify, project }: ProjectCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -106,11 +138,6 @@ function ProjectCard({ project, onNotify }: ProjectCardProps) {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [menuOpen]);
-
-  const closeAndNotify = (message: string) => {
-    setMenuOpen(false);
-    onNotify(message);
-  };
 
   return (
     <article
@@ -172,7 +199,10 @@ function ProjectCard({ project, onNotify }: ProjectCardProps) {
             <button
               role="menuitem"
               type="button"
-              onClick={() => closeAndNotify('重命名/删除将在后续版本开放')}
+              onClick={() => {
+                setMenuOpen(false);
+                onNotify('重命名将在后续版本开放');
+              }}
             >
               重命名
             </button>
@@ -180,7 +210,10 @@ function ProjectCard({ project, onNotify }: ProjectCardProps) {
               className="ws-project-menu-danger"
               role="menuitem"
               type="button"
-              onClick={() => closeAndNotify('重命名/删除将在后续版本开放')}
+              onClick={() => {
+                setMenuOpen(false);
+                onDelete(project);
+              }}
             >
               删除
             </button>
@@ -192,9 +225,15 @@ function ProjectCard({ project, onNotify }: ProjectCardProps) {
 }
 
 export function WorkspaceScreen() {
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [listState, setListState] = useState<'error' | 'loading' | 'ready'>('loading');
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ProjectItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const mainRef = useRef<HTMLElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -209,6 +248,30 @@ export function WorkspaceScreen() {
     }, 2400);
   }, []);
 
+  const loadProjects = useCallback(async () => {
+    if (!window.miaoma?.project) {
+      setProjects(DEMO_PROJECTS.map((project) => ({ ...project })));
+      setListState('ready');
+      return;
+    }
+
+    setListState('loading');
+
+    try {
+      const summaries = unwrapIpc(await window.miaoma.project.list());
+      setProjects(summaries.map(toProjectItem));
+      setListState('ready');
+    } catch (error) {
+      setProjects([]);
+      setListState('error');
+      notify(error instanceof Error ? error.message : '读取项目列表失败。');
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
   useEffect(() => {
     return () => {
       if (noticeTimer.current !== null) {
@@ -216,6 +279,65 @@ export function WorkspaceScreen() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!pendingDelete) {
+      return;
+    }
+
+    cancelDeleteRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !deleting) {
+        setPendingDelete(null);
+        setDeleteError(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [pendingDelete, deleting]);
+
+  const requestDelete = useCallback((project: ProjectItem) => {
+    setDeleteError(null);
+    setPendingDelete(project);
+  }, []);
+
+  const closeDeleteDialog = useCallback(() => {
+    if (deleting) {
+      return;
+    }
+
+    setPendingDelete(null);
+    setDeleteError(null);
+  }, [deleting]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete || deleting) {
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      if (window.miaoma?.project) {
+        unwrapIpc(await window.miaoma.project.delete(pendingDelete.id));
+      }
+
+      setProjects((previous) => previous.filter((project) => project.id !== pendingDelete.id));
+      setPendingDelete(null);
+      notify(`已删除「${pendingDelete.title}」`);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : '删除项目失败。');
+      void loadProjects();
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleting, loadProjects, notify, pendingDelete]);
 
   const scrollToTop = () => {
     mainRef.current?.scrollTo({ behavior: 'smooth', top: 0 });
@@ -308,10 +430,30 @@ export function WorkspaceScreen() {
               <span className="ws-create-button">创建新作品</span>
             </button>
 
-            {PROJECTS.map((project) => (
-              <ProjectCard key={project.id} project={project} onNotify={notify} />
+            {projects.map((project) => (
+              <ProjectCard
+                key={project.id}
+                project={project}
+                onDelete={requestDelete}
+                onNotify={notify}
+              />
             ))}
           </section>
+
+          {listState === 'loading' ? <p className="ws-list-note">正在加载项目…</p> : null}
+
+          {listState === 'error' ? (
+            <div className="ws-list-error" role="alert">
+              <span>项目列表读取失败。</span>
+              <button type="button" onClick={() => void loadProjects()}>
+                重试
+              </button>
+            </div>
+          ) : null}
+
+          {listState === 'ready' && projects.length === 0 ? (
+            <p className="ws-list-note">还没有项目，点击「创建新作品」开始。</p>
+          ) : null}
         </div>
 
         {notice ? (
@@ -320,6 +462,56 @@ export function WorkspaceScreen() {
           </div>
         ) : null}
       </main>
+
+      {pendingDelete ? (
+        <div
+          className="ws-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeDeleteDialog();
+            }
+          }}
+        >
+          <div
+            aria-describedby="ws-delete-description"
+            aria-labelledby="ws-delete-title"
+            aria-modal="true"
+            className="ws-dialog"
+            role="dialog"
+          >
+            <h2 className="ws-dialog-title" id="ws-delete-title">
+              删除项目
+            </h2>
+            <p className="ws-dialog-description" id="ws-delete-description">
+              确定删除「{pendingDelete.title}」吗？此操作不可撤销。
+            </p>
+            {deleteError ? (
+              <p className="ws-dialog-error" role="alert">
+                {deleteError}
+              </p>
+            ) : null}
+            <div className="ws-dialog-actions">
+              <button
+                className="ws-dialog-cancel"
+                disabled={deleting}
+                onClick={closeDeleteDialog}
+                ref={cancelDeleteRef}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="ws-dialog-confirm"
+                disabled={deleting}
+                onClick={() => void confirmDelete()}
+                type="button"
+              >
+                {deleting ? '删除中…' : '删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

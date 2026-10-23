@@ -641,6 +641,12 @@
   filter: brightness(1.08);
 }
 
+.cr-create:disabled,
+.cr-create:disabled:hover {
+  cursor: wait;
+  filter: saturate(0.65) brightness(0.8);
+}
+
 .cr-create:active {
   transform: translateY(1px);
 }

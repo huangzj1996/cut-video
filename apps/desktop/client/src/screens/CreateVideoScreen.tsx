@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VoiceClip } from '@miaoma/video-project';
 import brandMarkUrl from '../assets/brand-mark.png';
+import { unwrapIpc } from '../lib/ipc';
 import { EditorIcon } from './editor-icons';
 import './create-video.css';
 
@@ -28,6 +29,7 @@ export function CreateVideoScreen() {
   );
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const voiceRef = useRef<HTMLDivElement>(null);
   const noticeTimer = useRef<number | null>(null);
 
@@ -73,14 +75,33 @@ export function CreateVideoScreen() {
     };
   }, [voiceOpen]);
 
-  const handleCreate = useCallback(() => {
-    if (!script.trim()) {
+  const handleCreate = useCallback(async () => {
+    const trimmed = script.trim();
+
+    if (!trimmed) {
       notify('请先输入视频文稿');
       return;
     }
 
-    window.location.hash = '#/create-chat';
-  }, [notify, script]);
+    if (creating) {
+      return;
+    }
+
+    setCreating(true);
+
+    try {
+      if (window.miaoma?.project) {
+        const name = trimmed.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '未命名创作';
+        unwrapIpc(await window.miaoma.project.create({ name }));
+      }
+
+      window.location.hash = '#/create-chat';
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '创建项目失败。');
+    } finally {
+      setCreating(false);
+    }
+  }, [creating, notify, script]);
 
   return (
     <div className="create-screen">
@@ -224,9 +245,16 @@ export function CreateVideoScreen() {
               ) : null}
             </div>
 
-            <button className="cr-create" type="button" onClick={handleCreate}>
+            <button
+              className="cr-create"
+              disabled={creating}
+              type="button"
+              onClick={() => {
+                void handleCreate();
+              }}
+            >
               <EditorIcon name="sparkles" size={21} />
-              <span>创建</span>
+              <span>{creating ? '创建中…' : '创建'}</span>
             </button>
           </section>
         </div>

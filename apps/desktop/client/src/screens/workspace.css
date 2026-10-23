@@ -695,6 +695,132 @@
   }
 }
 
+/* Loading, empty, and error states */
+
+.ws-list-note {
+  margin: 18px 0 0;
+  color: var(--ws-muted);
+  font-size: 13px;
+}
+
+.ws-list-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 12px 16px;
+  border: 1px solid rgba(240, 95, 115, 0.35);
+  border-radius: 12px;
+  background: rgba(240, 95, 115, 0.08);
+  color: #f4b7bf;
+  font-size: 13px;
+}
+
+.ws-list-error button {
+  flex: none;
+  padding: 5px 12px;
+  border: 1px solid rgba(240, 95, 115, 0.45);
+  border-radius: 8px;
+  background: transparent;
+  color: #ffd9de;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ws-list-error button:hover {
+  background: rgba(240, 95, 115, 0.16);
+}
+
+/* Delete confirmation */
+
+.ws-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 5, 8, 0.68);
+  backdrop-filter: blur(8px);
+}
+
+.ws-dialog {
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid #2f323b;
+  border-radius: 18px;
+  background: #191a1f;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+
+.ws-dialog-title {
+  margin: 0;
+  color: var(--ws-text);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.ws-dialog-description {
+  margin: 12px 0 0;
+  color: var(--ws-text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.ws-dialog-error {
+  margin: 12px 0 0;
+  color: #ff9aa6;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ws-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.ws-dialog-actions button {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    filter 150ms ease,
+    background 150ms ease;
+}
+
+.ws-dialog-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ws-dialog-cancel {
+  border: 1px solid #353944;
+  background: transparent;
+  color: #d8dbe2;
+}
+
+.ws-dialog-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ws-dialog-confirm {
+  border: 0;
+  background: #f05f73;
+  color: #1a0a0d;
+}
+
+.ws-dialog-confirm:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
 @media (max-width: 1440px) {
   .ws-project-title {
     font-size: 16px;

@@ -11,6 +11,7 @@ export type ProbeVideoFn = (candidate: ScanCandidate) => Promise<VideoMetadata |
 
 export interface PreparedProjectAssets {
   assets: ProjectAssets;
+  probes: ReadonlyMap<string, VideoMetadata>;
   roots: string[];
   scanResult: ScanResult;
 }
@@ -91,6 +92,7 @@ export async function prepareProjectAssets(
   }
 
   const videos: VideoAsset[] = [];
+  const probes = new Map<string, VideoMetadata>();
 
   for (const candidate of readyVideos) {
     let metadata: VideoMetadata | null;
@@ -105,6 +107,7 @@ export async function prepareProjectAssets(
       continue;
     }
 
+    probes.set(candidate.pathKey, metadata);
     videos.push({
       durationMs: metadata.durationMs,
       fps: metadata.fps,
@@ -132,6 +135,7 @@ export async function prepareProjectAssets(
       videos,
       voices: [],
     },
+    probes,
     roots: [normalizedPath],
     scanResult,
   };
@@ -156,6 +160,7 @@ export function buildAssetSelectionManifest(
       mtimeMs: candidate.mtimeMs,
       path: candidate.path,
       pathKey: candidate.pathKey,
+      probe: prepared.probes.get(candidate.pathKey),
       sizeBytes: candidate.sizeBytes,
       status: candidate.status,
     })),

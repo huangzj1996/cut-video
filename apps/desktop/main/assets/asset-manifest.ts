@@ -1,5 +1,6 @@
 import type { ScanCandidateStatus, ScanDetected, ScanIssue } from './asset-scanner';
 import type { AssetKind } from './extension-registry';
+import type { VideoMetadata } from './video-probe';
 
 export const ASSET_MANIFEST_VERSION = 1;
 
@@ -13,6 +14,7 @@ export interface AssetManifestItem {
   mtimeMs: number;
   path: string;
   pathKey: string;
+  probe?: VideoMetadata;
   sizeBytes: number;
   status: ScanCandidateStatus;
 }

@@ -1,9 +1,37 @@
 import { spawn } from 'node:child_process';
 
+export interface VideoAudioMetadata {
+  bitRate?: number;
+  channelLayout?: string;
+  channels?: number;
+  codec?: string;
+  sampleRate?: number;
+}
+
 export interface VideoMetadata {
+  audio?: VideoAudioMetadata;
+  bitRate?: number;
+  codec?: string;
+  codecLongName?: string;
+  codedHeight?: number;
+  codedWidth?: number;
+  colorPrimaries?: string;
+  colorSpace?: string;
+  colorTransfer?: string;
+  container?: string;
+  displayAspectRatio?: string;
   durationMs: number;
+  formatLongName?: string;
   fps: number;
+  frameCount?: number;
   height: number;
+  isHdr: boolean;
+  isVfr: boolean;
+  pixelFormat?: string;
+  profile?: string;
+  rotation: number;
+  sampleAspectRatio?: string;
+  sizeBytes?: number;
   width: number;
 }
 
@@ -25,6 +53,15 @@ function toNumber(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function toText(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const text = value.trim();
+  return text.length > 0 ? text : undefined;
 }
 
 function parseRate(value: unknown): number | undefined {
@@ -67,9 +104,28 @@ function parseRotation(stream: Record<string, unknown>): number {
   return (tags ? toNumber(tags.rotate) : undefined) ?? 0;
 }
 
+function normalizeRotation(value: number): number {
+  const normalized = Math.round(value) % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function parseAudioMetadata(stream: Record<string, unknown>): VideoAudioMetadata {
+  return {
+    bitRate: toNumber(stream.bit_rate),
+    channelLayout: toText(stream.channel_layout),
+    channels: toNumber(stream.channels),
+    codec: toText(stream.codec_name),
+    sampleRate: toNumber(stream.sample_rate),
+  };
+}
+
 /**
- * 解析 ffprobe 的 JSON 输出，返回时间线需要的显示尺寸、帧率和时长。
- * 旋转 90/270 时交换宽高，返回的是「显示尺寸」。
+ * 解析 ffprobe 的 JSON 输出，返回完整的视频元数据：
+ * 时长、显示/编码分辨率、帧率、VFR、编码、profile、像素格式、旋转角、
+ * 色彩信息、HDR 标记、码率、容器，以及首条音频流信息。
+ *
+ * 旋转 90/270 时 `width/height` 返回显示尺寸，`codedWidth/codedHeight`
+ * 保留编码尺寸；`rotation` 归一化到 0–359。
  */
 export function parseFfprobeOutput(output: string): VideoMetadata | null {
   let parsed: unknown;
@@ -98,37 +154,70 @@ export function parseFfprobeOutput(output: string): VideoMetadata | null {
     return null;
   }
 
-  const width = toNumber(videoStream.width);
-  const height = toNumber(videoStream.height);
-  const fps = parseRate(videoStream.avg_frame_rate) ?? parseRate(videoStream.r_frame_rate);
-  const format = isRecord(parsed.format) ? parsed.format : undefined;
-  const durationSeconds = toNumber(format?.duration) ?? toNumber(videoStream.duration);
+  const format = isRecord(parsed.format) ? parsed.format : {};
+  const codedWidth = toNumber(videoStream.width);
+  const codedHeight = toNumber(videoStream.height);
+  const averageFps = parseRate(videoStream.avg_frame_rate);
+  const realFps = parseRate(videoStream.r_frame_rate);
+  const fps = averageFps ?? realFps;
   const frameCount = toNumber(videoStream.nb_frames);
-  const effectiveDuration =
-    durationSeconds ??
+  const durationSeconds =
+    toNumber(format.duration) ??
+    toNumber(videoStream.duration) ??
     (frameCount !== undefined && fps !== undefined ? frameCount / fps : undefined);
 
   if (
-    width === undefined ||
-    height === undefined ||
+    codedWidth === undefined ||
+    codedHeight === undefined ||
     fps === undefined ||
-    effectiveDuration === undefined ||
-    width <= 0 ||
-    height <= 0 ||
+    durationSeconds === undefined ||
+    codedWidth <= 0 ||
+    codedHeight <= 0 ||
     fps <= 0 ||
-    effectiveDuration <= 0
+    durationSeconds <= 0
   ) {
     return null;
   }
 
-  const rotation = parseRotation(videoStream);
-  const swapDimensions = Math.abs(Math.round(rotation)) % 180 === 90;
+  const rotation = normalizeRotation(parseRotation(videoStream));
+  const swapDimensions = rotation === 90 || rotation === 270;
+  const colorTransfer = toText(videoStream.color_transfer);
+  const colorPrimaries = toText(videoStream.color_primaries);
+  const isHdr =
+    colorTransfer === 'smpte2084' ||
+    colorTransfer === 'arib-std-b67' ||
+    colorPrimaries === 'bt2020';
+  const isVfr =
+    averageFps !== undefined &&
+    realFps !== undefined &&
+    Math.abs(averageFps - realFps) > Math.max(averageFps, realFps) * 0.01;
+  const audioStream = streams.find((stream) => isRecord(stream) && stream.codec_type === 'audio');
 
   return {
-    durationMs: Math.round(effectiveDuration * 1000),
+    audio: isRecord(audioStream) ? parseAudioMetadata(audioStream) : undefined,
+    bitRate: toNumber(format.bit_rate) ?? toNumber(videoStream.bit_rate),
+    codec: toText(videoStream.codec_name),
+    codecLongName: toText(videoStream.codec_long_name),
+    codedHeight,
+    codedWidth,
+    colorPrimaries,
+    colorSpace: toText(videoStream.color_space),
+    colorTransfer,
+    container: toText(format.format_name),
+    displayAspectRatio: toText(videoStream.display_aspect_ratio),
+    durationMs: Math.round(durationSeconds * 1000),
+    formatLongName: toText(format.format_long_name),
     fps,
-    height: swapDimensions ? width : height,
-    width: swapDimensions ? height : width,
+    frameCount,
+    height: swapDimensions ? codedWidth : codedHeight,
+    isHdr,
+    isVfr,
+    pixelFormat: toText(videoStream.pix_fmt),
+    profile: toText(videoStream.profile),
+    rotation,
+    sampleAspectRatio: toText(videoStream.sample_aspect_ratio),
+    sizeBytes: toNumber(format.size),
+    width: swapDimensions ? codedHeight : codedWidth,
   };
 }
 

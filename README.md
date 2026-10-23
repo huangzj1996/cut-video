@@ -65,7 +65,7 @@ pnpm make             # 生成 Windows 安装包
 - IPC 通道：`project:list`、`project:get`、`project:create`、`project:update`、`project:delete`。
 - 写入使用临时文件 + rename；项目 ID 经过白名单校验，所有操作限制在工程根目录内。
 - 主进程只返回结构化 `IpcResponse`，不向渲染进程暴露文件路径、原始异常或 `ipcRenderer`。
-- 创作页可输入本机视频素材目录或文件路径；点击创建时扫描并按 ffprobe 解析时长 / fps / 分辨率，写入 `ProjectAssets` 与 `inputs/assets.json`。ffprobe 未配置时创建会返回明确错误。
+- 创作页可输入本机视频素材目录或文件路径；点击创建时扫描并按 ffprobe 解析时长、显示/编码分辨率、帧率、编码、旋转、VFR、HDR、码率和音频流等元数据，`ProjectAssets` 保存时间线字段，完整探测结果写入 `inputs/assets.json`。ffprobe 未配置时创建会返回明确错误。
 
 ## 文档
 

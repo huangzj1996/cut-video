@@ -12,7 +12,20 @@ const MP4 = (() => {
   return buffer;
 })();
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-const METADATA = { durationMs: 5000, fps: 30, height: 1080, width: 1920 };
+const METADATA = {
+  bitRate: 1_000_000,
+  codec: 'h264',
+  container: 'mov,mp4',
+  durationMs: 5000,
+  fps: 30,
+  height: 1080,
+  isHdr: false,
+  isVfr: false,
+  pixelFormat: 'yuv420p',
+  profile: 'High',
+  rotation: 0,
+  width: 1920,
+};
 
 let directory: string;
 
@@ -55,6 +68,13 @@ describe('prepareProjectAssets', () => {
     expect(manifest.projectId).toBe('project-1');
     expect(manifest.roots).toEqual([directory]);
     expect(manifest.items.map((item) => item.fileName).sort()).toEqual(['clip.mp4', 'photo.jpg']);
+
+    const videoItem = manifest.items.find((item) => item.fileName === 'clip.mp4');
+    expect(videoItem?.probe).toMatchObject({
+      codec: 'h264',
+      durationMs: 5000,
+      rotation: 0,
+    });
   });
 
   it('accepts a single video file path', async () => {

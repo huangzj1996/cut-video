@@ -77,6 +77,7 @@ export type IpcErrorCode =
   | 'ASSET_NO_VIDEOS'
   | 'ASSET_PROBE_FAILED'
   | 'ASSET_PROBE_UNAVAILABLE'
+  | 'ASSET_KEYFRAME_UNAVAILABLE'
   | 'ASSET_MANIFEST_WRITE_FAILED';
 
 export interface IpcErrorPayload {

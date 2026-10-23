@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import started from 'electron-squirrel-startup';
+import { extractKeyframes, probeVideoResult } from '@miaoma/video-agent';
 import {
   IPC_CHANNELS,
   type AppInfo,
@@ -14,8 +15,8 @@ import {
   type IpcResult,
   type MediaInfo,
 } from '../shared/ipc-contract';
+import { attachKeyframes } from './assets/keyframe-assets';
 import { buildAssetSelectionManifest, prepareProjectAssets } from './assets/project-assets';
-import { probeVideo } from './assets/video-probe';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { resolveMediaBinary } from './media/ffmpeg-path';
 import { ProjectStore } from './projects/project-store';
@@ -66,6 +67,15 @@ function resolveFfprobeExecutable(): string {
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     name: 'ffprobe',
+  });
+}
+
+function resolveFfmpegExecutable(): string {
+  return resolveMediaBinary({
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    name: 'ffmpeg',
   });
 }
 
@@ -136,6 +146,7 @@ function registerIpcHandlers(): void {
 
     const trimmedAssetPath = typeof assetPath === 'string' ? assetPath.trim() : '';
     let prepared: Awaited<ReturnType<typeof prepareProjectAssets>> | undefined;
+    let ffmpegPath: string | undefined;
 
     if (trimmedAssetPath) {
       const ffprobePath = resolveFfprobeExecutable();
@@ -147,23 +158,43 @@ function registerIpcHandlers(): void {
         );
       }
 
+      ffmpegPath = resolveFfmpegExecutable();
+
+      if (!isBinaryAvailable(ffmpegPath)) {
+        throw new IpcError(
+          'ASSET_KEYFRAME_UNAVAILABLE',
+          '未找到 ffmpeg。请将 ffmpeg.exe 放入 resources/ffmpeg/，或设置 MIAOMA_FFMPEG_PATH。',
+        );
+      }
+
       prepared = await prepareProjectAssets(trimmedAssetPath, (candidate) =>
-        probeVideo(ffprobePath, candidate.path),
+        probeVideoResult(ffprobePath, candidate.path),
       );
     }
 
     const projectStore = getProjectStore();
-    const project = projectStore.create(input, prepared ? { assets: prepared.assets } : undefined);
+    let project = projectStore.create(input, prepared ? { assets: prepared.assets } : undefined);
+    const projectId = project.project.projectId;
 
-    if (prepared) {
+    if (prepared && ffmpegPath) {
       try {
+        const cacheRoot = projectStore.getKeyframeCacheDirectory(projectId);
+        const attached = await attachKeyframes(prepared, (source) =>
+          extractKeyframes(source, { cacheRoot, ffmpegPath }),
+        );
+
+        project = projectStore.replaceAssets(projectId, attached.assets);
         projectStore.writeAssetManifest(
-          project.project.projectId,
-          buildAssetSelectionManifest(project.project.projectId, prepared),
+          projectId,
+          buildAssetSelectionManifest(projectId, prepared, {
+            keyframeCacheKeys: attached.cacheKeys,
+            keyframeCounts: attached.frameCounts,
+            keyframeErrors: attached.errors,
+          }),
         );
       } catch (error) {
         try {
-          projectStore.delete(project.project.projectId);
+          projectStore.delete(projectId);
         } catch {
           // 回滚失败时保留原始错误。
         }

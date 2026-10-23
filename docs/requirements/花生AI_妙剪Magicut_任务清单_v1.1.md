@@ -215,7 +215,7 @@
 
 **依赖**：T05
 
-**状态**：部分完成。ffprobe 视频元数据提取（时长、编码/显示分辨率、帧率、VFR、编码/profile/pix_fmt、旋转、色彩/HDR、码率、容器、音频流）已落地并写入 `inputs/assets.json`；关键帧、代理、缓存、字体和随包分发待实现。
+**状态**：部分完成。ffprobe 视频元数据（时长、编码/显示分辨率、帧率、VFR、编码/profile/pix_fmt、旋转、色彩/HDR、码率、容器、音频流）与关键帧提取已落地，统一放在 `@miaoma/video-agent` 的 `src/media/`；探测和抽帧失败按视频隔离，错误分类（损坏、不支持格式、权限、超时、二进制缺失）写入 `inputs/assets.json`。关键帧按内容 SHA-256 缓存到 `<project>/cache/keyframes`，映射为 `ThumbnailAsset` 并回填 `VideoAsset.thumbnailIds`。代理、缓存重建入口、字体和随包分发待实现。
 
 **交付物**：媒体处理器、缓存、代理生成、字体资源、FFmpeg/ffprobe 打包配置。
 
@@ -224,8 +224,8 @@
 - [ ] ffprobe 提取视频/音频/图片元数据；旋转信息被正确处理；导出启用自动旋转。
 - [ ] ffprobe 结果映射到 `VideoAsset.durationMs/fps/width/height`；图片不写 `fps`，视频必须写 `fps`。
 - [ ] 能识别 VFR、HEVC、HDR；按策略转代理或明确拒绝，不静默失败。
-- [ ] 关键帧提取遵守每视频最多 8 帧、长边 768；按内容哈希缓存。
-- [ ] 关键帧映射为 `ThumbnailAsset`（id/path/width/height/timeMs），并由 `VideoAsset.thumbnailIds` 引用。
+- [x] 关键帧提取遵守每视频最多 8 帧、长边 768；按内容哈希缓存。
+- [x] 关键帧映射为 `ThumbnailAsset`（id/path/width/height/timeMs），并由 `VideoAsset.thumbnailIds` 引用。
 - [ ] 删除 `cache/` 后可重建缩略图、关键帧和代理，不触发云端分析。
 - [ ] 代理按需生成 960×540、H.264/AAC、30fps；H.264/AAC MP4/MOV 可直接预览。
 - [ ] 中文字体随包；ASS 测试能正确渲染中文；开发态/打包态路径一致。

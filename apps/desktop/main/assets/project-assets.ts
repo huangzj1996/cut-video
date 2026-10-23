@@ -1,19 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import type { MediaErrorSummary, VideoMetadata, VideoProbeResult } from '@miaoma/video-agent';
+import { toMediaErrorSummary } from '@miaoma/video-agent';
 import type { ProjectAssets, VideoAsset } from '@miaoma/video-project';
 import type { AssetSelectionManifest } from './asset-manifest';
 import { ASSET_MANIFEST_VERSION } from './asset-manifest';
 import { scanAssetRoots, type ScanCandidate, type ScanResult } from './asset-scanner';
-import type { VideoMetadata } from './video-probe';
 import { IpcError } from '../ipc-error';
 
-export type ProbeVideoFn = (candidate: ScanCandidate) => Promise<VideoMetadata | null>;
+export type ProbeVideoFn = (candidate: ScanCandidate) => Promise<VideoProbeResult>;
 
 export interface PreparedProjectAssets {
   assets: ProjectAssets;
+  probeErrors: ReadonlyMap<string, MediaErrorSummary>;
   probes: ReadonlyMap<string, VideoMetadata>;
   roots: string[];
   scanResult: ScanResult;
+}
+
+export interface AssetSelectionManifestExtras {
+  /** pathKey → 关键帧内容哈希缓存键 */
+  keyframeCacheKeys?: ReadonlyMap<string, string>;
+  /** pathKey → 成功写入的关键帧数量 */
+  keyframeCounts?: ReadonlyMap<string, number>;
+  /** pathKey → 关键帧提取失败原因 */
+  keyframeErrors?: ReadonlyMap<string, MediaErrorSummary>;
 }
 
 function normalizeAssetPath(input: string): string {
@@ -93,20 +104,28 @@ export async function prepareProjectAssets(
 
   const videos: VideoAsset[] = [];
   const probes = new Map<string, VideoMetadata>();
+  const probeErrors = new Map<string, MediaErrorSummary>();
 
   for (const candidate of readyVideos) {
-    let metadata: VideoMetadata | null;
+    let result: VideoProbeResult;
 
     try {
-      metadata = await probe(candidate);
+      result = await probe(candidate);
     } catch {
-      metadata = null;
-    }
-
-    if (!metadata) {
+      probeErrors.set(candidate.pathKey, {
+        code: 'MEDIA_PROCESS_FAILED',
+        message: '媒体处理失败。',
+        retryable: true,
+      });
       continue;
     }
 
+    if (!result.ok) {
+      probeErrors.set(candidate.pathKey, toMediaErrorSummary(result.error));
+      continue;
+    }
+
+    const metadata = result.metadata;
     probes.set(candidate.pathKey, metadata);
     videos.push({
       durationMs: metadata.durationMs,
@@ -135,6 +154,7 @@ export async function prepareProjectAssets(
       videos,
       voices: [],
     },
+    probeErrors,
     probes,
     roots: [normalizedPath],
     scanResult,
@@ -148,22 +168,34 @@ export async function prepareProjectAssets(
 export function buildAssetSelectionManifest(
   projectId: string,
   prepared: PreparedProjectAssets,
+  extras: AssetSelectionManifestExtras = {},
 ): AssetSelectionManifest {
   return {
-    items: prepared.scanResult.candidates.map((candidate) => ({
-      detected: candidate.detected,
-      extension: candidate.extension,
-      fileName: candidate.fileName,
-      issues: candidate.issues,
-      itemId: randomUUID(),
-      kind: candidate.kind,
-      mtimeMs: candidate.mtimeMs,
-      path: candidate.path,
-      pathKey: candidate.pathKey,
-      probe: prepared.probes.get(candidate.pathKey),
-      sizeBytes: candidate.sizeBytes,
-      status: candidate.status,
-    })),
+    items: prepared.scanResult.candidates.map((candidate) => {
+      const probeError = prepared.probeErrors.get(candidate.pathKey);
+      const keyframeCacheKey = extras.keyframeCacheKeys?.get(candidate.pathKey);
+      const keyframeCount = extras.keyframeCounts?.get(candidate.pathKey);
+      const keyframeError = extras.keyframeErrors?.get(candidate.pathKey);
+
+      return {
+        detected: candidate.detected,
+        extension: candidate.extension,
+        fileName: candidate.fileName,
+        issues: candidate.issues,
+        itemId: randomUUID(),
+        kind: candidate.kind,
+        ...(keyframeCacheKey ? { keyframeCacheKey } : {}),
+        ...(keyframeCount !== undefined ? { keyframeCount } : {}),
+        ...(keyframeError ? { keyframeError } : {}),
+        mtimeMs: candidate.mtimeMs,
+        path: candidate.path,
+        pathKey: candidate.pathKey,
+        probe: prepared.probes.get(candidate.pathKey),
+        ...(probeError ? { probeError } : {}),
+        sizeBytes: candidate.sizeBytes,
+        status: candidate.status,
+      };
+    }),
     issues: prepared.scanResult.issues,
     manifestVersion: ASSET_MANIFEST_VERSION,
     projectId,

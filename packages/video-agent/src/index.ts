@@ -1,3 +1,7 @@
+export * from './media/keyframe-extractor';
+export * from './media/media-error';
+export * from './media/video-probe';
+
 export const WORKFLOW_NODE_IDS = [
   'scan_assets',
   'analyze_assets',

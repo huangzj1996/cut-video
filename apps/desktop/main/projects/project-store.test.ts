@@ -2,7 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { PROJECT_SCHEMA_VERSION, type StoredProject } from '@miaoma/video-project';
+import {
+  PROJECT_SCHEMA_VERSION,
+  type ProjectAssets,
+  type StoredProject,
+} from '@miaoma/video-project';
 import { IpcError } from '../ipc-error';
 import { ProjectStore } from './project-store';
 
@@ -131,6 +135,53 @@ describe('ProjectStore', () => {
     const created = store.create({ name: '带素材项目' }, { assets });
 
     expect(store.get(created.project.projectId).assets).toEqual(assets);
+  });
+
+  it('replaces creation-time assets without changing contentRevision', () => {
+    const created = store.create({ name: '关键帧项目' });
+    const assets: ProjectAssets = {
+      music: [],
+      subtitles: [],
+      thumbnails: [
+        {
+          height: 432,
+          id: 'thumb-1',
+          path: 'C:/project/cache/keyframes/aa/frame-00-2500ms.jpg',
+          timeMs: 2500,
+          width: 768,
+        },
+      ],
+      videos: [
+        {
+          durationMs: 5000,
+          fps: 30,
+          height: 1080,
+          id: 'asset-video-1',
+          mediaType: 'video',
+          path: 'C:/media/clip.mp4',
+          thumbnailIds: ['thumb-1'],
+          width: 1920,
+        },
+      ],
+      voices: [],
+    };
+
+    const updated = store.replaceAssets(created.project.projectId, assets);
+
+    expect(updated.project.contentRevision).toBe(0);
+    expect(updated.project.updatedAt).toBe(created.project.updatedAt);
+    expect(store.get(created.project.projectId).assets).toEqual(assets);
+  });
+
+  it('returns the keyframe cache directory inside the project', () => {
+    const created = store.create({ name: '缓存项目' });
+    const projectId = created.project.projectId;
+
+    expect(store.getKeyframeCacheDirectory(projectId)).toBe(
+      path.join(root, projectId, 'cache', 'keyframes'),
+    );
+    expectIpcError(() => store.getKeyframeCacheDirectory('missing-project'), 'PROJECT_NOT_FOUND');
+    expectIpcError(() => store.getKeyframeCacheDirectory('../escape'), 'PROJECT_INVALID_ARGUMENT');
   });
 
   it('deletes a project directory', () => {

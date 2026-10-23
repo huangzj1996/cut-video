@@ -224,6 +224,39 @@ export class ProjectStore {
   }
 
   /**
+   * 写入创建阶段派生的素材（例如关键帧缩略图），不递增 contentRevision。
+   * 仅用于工程创建流程；用户编辑仍走 update()。
+   */
+  replaceAssets(rawProjectId: string, assets: ProjectAssets): StoredProject {
+    const projectId = this.parseProjectId(rawProjectId);
+    const existing = this.readProject(projectId);
+    const parsed = StoredProjectSchema.safeParse({ ...existing, assets });
+
+    if (!parsed.success) {
+      throw new IpcError('PROJECT_INVALID', '项目内容结构无效。', false, {
+        issues: toProjectIssues(parsed.error),
+      });
+    }
+
+    this.writeProject(projectId, parsed.data);
+    return parsed.data;
+  }
+
+  /**
+   * 关键帧缓存目录：`<project>/cache/keyframes`，可安全删除后重建。
+   */
+  getKeyframeCacheDirectory(rawProjectId: string): string {
+    const projectId = this.parseProjectId(rawProjectId);
+    const directory = this.projectDirectory(projectId);
+
+    if (!existsSync(path.join(directory, PROJECT_DIRECTORY_FILE))) {
+      throw new IpcError('PROJECT_NOT_FOUND', '项目不存在。');
+    }
+
+    return path.join(directory, 'cache', 'keyframes');
+  }
+
+  /**
    * 持久化创建页选中的素材清单。清单只供主进程/后续探测使用，
    * 不通过 IPC 返回给渲染进程。
    */

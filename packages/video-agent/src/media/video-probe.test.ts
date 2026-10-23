@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseFfprobeOutput, probeVideo } from './video-probe';
+import { parseFfprobeOutput, probeVideo, probeVideoResult } from './video-probe';
 
 function ffprobeJson(
   streams: Array<Record<string, unknown>>,
@@ -216,5 +216,17 @@ describe('probeVideo', () => {
     const missingBinary = path.join(tmpdir(), 'miaoma-missing-ffprobe.exe');
 
     await expect(probeVideo(missingBinary, 'clip.mp4')).resolves.toBeNull();
+  });
+});
+
+describe('probeVideoResult', () => {
+  it('reports MEDIA_BINARY_MISSING when the ffprobe binary cannot start', async () => {
+    const missingBinary = path.join(tmpdir(), 'miaoma-missing-ffprobe-result.exe');
+
+    const result = await probeVideoResult(missingBinary, 'clip.mp4');
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? undefined : result.error.code).toBe('MEDIA_BINARY_MISSING');
+    expect(result.ok ? undefined : result.error.retryable).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { MediaError, runMediaProcess } from './media-error';
 
 export interface VideoAudioMetadata {
   bitRate?: number;
@@ -34,6 +34,9 @@ export interface VideoMetadata {
   sizeBytes?: number;
   width: number;
 }
+
+export type VideoProbeResult =
+  { ok: true; metadata: VideoMetadata } | { ok: false; error: MediaError };
 
 const PROBE_TIMEOUT_MS = 15_000;
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
@@ -229,58 +232,45 @@ export async function probeVideo(
   ffprobePath: string,
   filePath: string,
 ): Promise<VideoMetadata | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let stdout = '';
-    const timerRef: { current?: ReturnType<typeof setTimeout> } = {};
+  const result = await probeVideoResult(ffprobePath, filePath);
+  return result.ok ? result.metadata : null;
+}
 
-    const finish = (value: VideoMetadata | null): void => {
-      if (settled) {
-        return;
-      }
+/**
+ * 调用 ffprobe 探测视频并返回结构化结果。
+ * 任何失败都转换为 `{ ok: false, error }`，不会抛出异常；
+ * error.message 为安全中文文案，不包含路径或原始 stderr。
+ */
+export async function probeVideoResult(
+  ffprobePath: string,
+  filePath: string,
+): Promise<VideoProbeResult> {
+  try {
+    const { stdout } = await runMediaProcess({
+      args: ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', filePath],
+      binaryPath: ffprobePath,
+      maxStdoutBytes: MAX_STDOUT_BYTES,
+      operation: 'probe',
+      timeoutMs: PROBE_TIMEOUT_MS,
+    });
+    const metadata = parseFfprobeOutput(stdout);
 
-      settled = true;
-
-      if (timerRef.current !== undefined) {
-        clearTimeout(timerRef.current);
-      }
-
-      resolve(value);
-    };
-
-    let child: ReturnType<typeof spawn>;
-
-    try {
-      child = spawn(
-        ffprobePath,
-        ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', filePath],
-        {
-          stdio: ['ignore', 'pipe', 'ignore'],
-          windowsHide: true,
-        },
-      );
-    } catch {
-      resolve(null);
-      return;
+    if (!metadata) {
+      return {
+        error: new MediaError(
+          'MEDIA_UNSUPPORTED_FORMAT',
+          '无法解析视频信息，文件可能已损坏或格式不受支持。',
+        ),
+        ok: false,
+      };
     }
 
-    timerRef.current = setTimeout(() => {
-      child.kill();
-      finish(null);
-    }, PROBE_TIMEOUT_MS);
+    return { metadata, ok: true };
+  } catch (error) {
+    if (error instanceof MediaError) {
+      return { error, ok: false };
+    }
 
-    child.stdout?.on('data', (chunk: Buffer) => {
-      if (stdout.length >= MAX_STDOUT_BYTES) {
-        child.kill();
-        finish(null);
-        return;
-      }
-
-      stdout += chunk.toString('utf8');
-    });
-    child.on('error', () => finish(null));
-    child.on('close', (code) => {
-      finish(code === 0 ? parseFfprobeOutput(stdout) : null);
-    });
-  });
+    return { error: new MediaError('MEDIA_PROCESS_FAILED', '媒体处理失败。', true), ok: false };
+  }
 }

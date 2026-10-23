@@ -162,7 +162,7 @@
 .cc-request {
   align-self: flex-end;
   width: min(760px, 100%);
-  padding: 16px;
+  padding: 18px 20px;
   border-radius: 14px;
   background: var(--cc-user-card);
 }
@@ -174,13 +174,14 @@
 .cc-request-head {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  height: 38px;
 }
 
 .cc-avatar {
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: linear-gradient(145deg, #3ee6c6 0%, #3bbde9 48%, #5b8cff 100%);
 }
@@ -221,11 +222,11 @@
 }
 
 .cc-request-text {
-  margin: 16px 0 0;
+  margin: 14px 0 0;
   color: #dce2ea;
   font-size: 14px;
   font-weight: 400;
-  line-height: 1.7;
+  line-height: 1.5;
 }
 
 .cc-request-tags {
@@ -238,23 +239,28 @@
 
 .cc-tag-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  height: 29px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #3d4045;
 }
 
 .cc-tag {
   display: inline-flex;
   align-items: center;
-  height: 26px;
+  height: 29px;
   padding: 0 10px;
-  border: 1px solid var(--cc-line-strong);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.035);
+  border: 0;
+  background: transparent;
   color: #c5cbd6;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1;
   white-space: nowrap;
+}
+
+.cc-tag:nth-child(2) {
+  background: #222833;
 }
 
 .cc-sent {

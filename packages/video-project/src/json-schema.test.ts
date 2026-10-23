@@ -42,9 +42,9 @@ describe('JSON Schema exports', () => {
 
     expect(Array.isArray(options)).toBe(true);
     expect(options).toHaveLength(4);
-    expect(
-      options.map((option) => asObject(asObject(option.properties).kind).const),
-    ).toEqual(expect.arrayContaining(['video', 'voice', 'subtitle', 'music']));
+    expect(options.map((option) => asObject(asObject(option.properties).kind).const)).toEqual(
+      expect.arrayContaining(['video', 'voice', 'subtitle', 'music']),
+    );
   });
 
   it('exports tracks as a four-way oneOf', () => {

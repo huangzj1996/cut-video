@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  PROJECT_SCHEMA_VERSION,
-  VideoProjectSchema,
-  type VideoProject,
-} from './index';
+import { PROJECT_SCHEMA_VERSION, VideoProjectSchema, type VideoProject } from './index';
 
 function createValidProjectInput() {
   return {
@@ -298,9 +294,7 @@ describe('VideoProjectSchema', () => {
 
   it('requires fps for video assets but not for image assets', () => {
     const withoutVideoFps = validProjectFixture();
-    const videoAsset = withoutVideoFps.assets.videos.find(
-      (asset) => asset.mediaType === 'video',
-    );
+    const videoAsset = withoutVideoFps.assets.videos.find((asset) => asset.mediaType === 'video');
     if (!videoAsset) {
       throw new Error('fixture is missing the video asset');
     }
@@ -313,9 +307,7 @@ describe('VideoProjectSchema', () => {
     }
 
     const withImageAsset = validProjectFixture();
-    const imageAsset = withImageAsset.assets.videos.find(
-      (asset) => asset.mediaType === 'image',
-    );
+    const imageAsset = withImageAsset.assets.videos.find((asset) => asset.mediaType === 'image');
     expect(imageAsset?.fps).toBeUndefined();
     expect(VideoProjectSchema.safeParse(withImageAsset).success).toBe(true);
   });

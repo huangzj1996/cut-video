@@ -30,11 +30,7 @@ const project: VideoProject = VideoProjectSchema.parse(rawProject);
 ## JSON Schema 导出
 
 ```ts
-import {
-  JSON_SCHEMA_EXPORTS,
-  getJsonSchema,
-  VideoProjectSchema,
-} from '@miaoma/video-project';
+import { JSON_SCHEMA_EXPORTS, getJsonSchema, VideoProjectSchema } from '@miaoma/video-project';
 
 const jsonSchema = getJsonSchema(VideoProjectSchema);
 // 或使用预注册的导出：

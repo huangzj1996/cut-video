@@ -7,3 +7,5 @@ coverage
 pnpm-lock.yaml
 docs
 *.pen
+.claude/skills
+.agents/skills

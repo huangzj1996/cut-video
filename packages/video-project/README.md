@@ -19,6 +19,12 @@ VideoProject
 
 片段使用 `kind` 判别联合：`VideoClip | VoiceClip | SubtitleClip | MusicClip`。轨道同样按 `kind` 判别，确保轨道只容纳对应种类的片段。
 
+## 草稿与存储工程
+
+- `DraftProjectSchema`：AI 运行前的草稿，包含工程头、默认画布/渲染、空资产/分镜/轨道和 `schemaVersion`，不含 `ai`。
+- `StoredProjectSchema`：`VideoProjectSchema | DraftProjectSchema`，作为 `project.json` 的存储契约。
+- 草稿升级为成片工程时补齐 `ai`、分镜和轨道，`schemaVersion` 保持不变；版本不兼容的工程由主进程拒绝读写。
+
 ## 使用
 
 ```ts

@@ -10,6 +10,8 @@
  * 3. 主进程用 `handle()` 注册，Preload 用 `invoke()` 暴露。
  */
 
+import type { StoredProject } from '@miaoma/video-project';
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -31,12 +33,43 @@ export interface MediaInfo {
   ffprobeExists: boolean;
 }
 
+export interface ProjectSummary {
+  contentRevision: number;
+  createdAt: string;
+  name: string;
+  projectId: string;
+  schemaVersion: string;
+  updatedAt: string;
+}
+
+export interface ProjectCreateInput {
+  name: string;
+}
+
+export interface ProjectUpdateInput {
+  project: StoredProject;
+  projectId: string;
+}
+
+export interface ProjectDeleteResult {
+  deleted: true;
+  projectId: string;
+}
+
 export type IpcErrorCode =
   | 'IPC_INVALID_ARGUMENT'
   | 'IPC_UNAVAILABLE'
   | 'IPC_INTERNAL'
   | 'SETTINGS_READ_FAILED'
-  | 'MEDIA_INFO_FAILED';
+  | 'MEDIA_INFO_FAILED'
+  | 'PROJECT_INVALID_ARGUMENT'
+  | 'PROJECT_NOT_FOUND'
+  | 'PROJECT_INVALID'
+  | 'PROJECT_SCHEMA_UNSUPPORTED'
+  | 'PROJECT_READ_FAILED'
+  | 'PROJECT_WRITE_FAILED'
+  | 'PROJECT_DELETE_FAILED'
+  | 'PROJECT_LIST_FAILED';
 
 export interface IpcErrorPayload {
   code: IpcErrorCode;
@@ -72,6 +105,26 @@ export interface IpcInvokeContract {
     params: [];
     result: MediaInfo;
   };
+  'project:list': {
+    params: [];
+    result: ProjectSummary[];
+  };
+  'project:get': {
+    params: [projectId: string];
+    result: StoredProject;
+  };
+  'project:create': {
+    params: [input: ProjectCreateInput];
+    result: StoredProject;
+  };
+  'project:update': {
+    params: [input: ProjectUpdateInput];
+    result: StoredProject;
+  };
+  'project:delete': {
+    params: [projectId: string];
+    result: ProjectDeleteResult;
+  };
 }
 
 export type IpcChannel = keyof IpcInvokeContract;
@@ -96,11 +149,27 @@ export const IPC_CHANNELS = {
   media: {
     getInfo: 'media:get-info' satisfies IpcChannel,
   },
+  project: {
+    create: 'project:create' satisfies IpcChannel,
+    delete: 'project:delete' satisfies IpcChannel,
+    get: 'project:get' satisfies IpcChannel,
+    list: 'project:list' satisfies IpcChannel,
+    update: 'project:update' satisfies IpcChannel,
+  },
 } as const satisfies Record<string, Record<string, IpcChannel>>;
+
+export interface MiaomaProjectApi {
+  list(): Promise<IpcResponse<IpcResult<'project:list'>>>;
+  get(projectId: string): Promise<IpcResponse<IpcResult<'project:get'>>>;
+  create(input: ProjectCreateInput): Promise<IpcResponse<IpcResult<'project:create'>>>;
+  update(input: ProjectUpdateInput): Promise<IpcResponse<IpcResult<'project:update'>>>;
+  delete(projectId: string): Promise<IpcResponse<IpcResult<'project:delete'>>>;
+}
 
 export interface MiaomaApi {
   ping(): Promise<IpcResponse<IpcResult<'app:ping'>>>;
   getAppInfo(): Promise<IpcResponse<IpcResult<'app:get-info'>>>;
   getSettings(): Promise<IpcResponse<IpcResult<'settings:get'>>>;
   getMediaInfo(): Promise<IpcResponse<IpcResult<'media:get-info'>>>;
+  project: MiaomaProjectApi;
 }

@@ -277,6 +277,26 @@ export const VideoProjectSchema = z.object({
   tracks: z.array(TimelineTrackSchema),
 });
 
+/**
+ * 草稿工程：AI 运行前没有 `ai`、分镜与轨道。
+ * 与 `VideoProjectSchema` 共用工程头、画布、渲染、资产与 `schemaVersion`。
+ */
+export const DraftProjectSchema = z.strictObject({
+  assets: ProjectAssetsSchema,
+  canvas: CanvasConfigSchema,
+  project: ProjectMetadataSchema,
+  render: RenderConfigSchema,
+  scenes: z.array(SceneSchema),
+  schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
+  tracks: z.array(TimelineTrackSchema),
+});
+
+/**
+ * 工程文件的完整结构：草稿或成片工程。
+ * 成片工程必须先匹配 `VideoProjectSchema`，避免 `ai` 被草稿分支静默丢弃。
+ */
+export const StoredProjectSchema = z.union([VideoProjectSchema, DraftProjectSchema]);
+
 // ===== 类型导出（全部由 Zod 推导） =====
 
 export type VideoAsset = z.infer<typeof VideoAssetSchema>;
@@ -310,3 +330,5 @@ export type MusicTrack = z.infer<typeof MusicTrackSchema>;
 export type TimelineTrack = z.infer<typeof TimelineTrackSchema>;
 
 export type VideoProject = z.infer<typeof VideoProjectSchema>;
+export type DraftProject = z.infer<typeof DraftProjectSchema>;
+export type StoredProject = z.infer<typeof StoredProjectSchema>;

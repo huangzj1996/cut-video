@@ -16,6 +16,7 @@ import {
 } from '../shared/ipc-contract';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { resolveMediaBinary } from './media/ffmpeg-path';
+import { ProjectStore } from './projects/project-store';
 import { loadSettings } from './settings';
 
 if (started) {
@@ -55,6 +56,14 @@ function buildMediaInfo(): MediaInfo {
     ffmpegExists: isBinaryAvailable(ffmpegPath),
     ffprobeExists: isBinaryAvailable(ffprobePath),
   };
+}
+
+function getProjectStore(): ProjectStore {
+  try {
+    return new ProjectStore(loadSettings().defaultProjectDirectory);
+  } catch {
+    throw new IpcError('SETTINGS_READ_FAILED', '读取应用设置失败。', true);
+  }
 }
 
 function handle<C extends IpcChannel>(channel: C, handler: IpcHandler<C>): void {
@@ -101,6 +110,12 @@ function registerIpcHandlers(): void {
       throw new IpcError('MEDIA_INFO_FAILED', '媒体工具检测失败。', true);
     }
   });
+
+  handle(IPC_CHANNELS.project.list, () => getProjectStore().list());
+  handle(IPC_CHANNELS.project.get, (projectId) => getProjectStore().get(projectId));
+  handle(IPC_CHANNELS.project.create, (input) => getProjectStore().create(input));
+  handle(IPC_CHANNELS.project.update, (input) => getProjectStore().update(input));
+  handle(IPC_CHANNELS.project.delete, (projectId) => getProjectStore().delete(projectId));
 }
 
 function createWindow(): void {

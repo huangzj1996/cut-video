@@ -20,6 +20,13 @@ const api: MiaomaApi = {
   getAppInfo: () => invoke(IPC_CHANNELS.app.getInfo),
   getSettings: () => invoke(IPC_CHANNELS.settings.get),
   getMediaInfo: () => invoke(IPC_CHANNELS.media.getInfo),
+  project: {
+    create: (input) => invoke(IPC_CHANNELS.project.create, input),
+    delete: (projectId) => invoke(IPC_CHANNELS.project.delete, projectId),
+    get: (projectId) => invoke(IPC_CHANNELS.project.get, projectId),
+    list: () => invoke(IPC_CHANNELS.project.list),
+    update: (input) => invoke(IPC_CHANNELS.project.update, input),
+  },
 };
 
 contextBridge.exposeInMainWorld('miaoma', api);

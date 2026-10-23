@@ -15,4 +15,14 @@ describe('IPC channel contract', () => {
   it('keeps channel names unique', () => {
     expect(new Set(channels).size).toBe(channels.length);
   });
+
+  it('registers the five project CRUD channels', () => {
+    expect(Object.values(IPC_CHANNELS.project).sort()).toEqual([
+      'project:create',
+      'project:delete',
+      'project:get',
+      'project:list',
+      'project:update',
+    ]);
+  });
 });

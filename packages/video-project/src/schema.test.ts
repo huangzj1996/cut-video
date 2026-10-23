@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { PROJECT_SCHEMA_VERSION, VideoProjectSchema, type VideoProject } from './index';
+import {
+  DraftProjectSchema,
+  PROJECT_SCHEMA_VERSION,
+  StoredProjectSchema,
+  VideoProjectSchema,
+  type VideoProject,
+} from './index';
 
 function createValidProjectInput() {
   return {
@@ -367,5 +373,32 @@ describe('VideoProjectSchema', () => {
     if (!result.success) {
       expect(result.error.issues[0]?.path).toEqual(['scenes', 0, 'voiceAssetId']);
     }
+  });
+});
+
+describe('StoredProjectSchema', () => {
+  it('accepts a draft without ai', () => {
+    const { ai: _ai, ...draft } = validProjectFixture();
+
+    expect(DraftProjectSchema.safeParse(draft).success).toBe(true);
+    expect(StoredProjectSchema.safeParse(draft).success).toBe(true);
+  });
+
+  it('accepts a completed video project', () => {
+    expect(StoredProjectSchema.safeParse(validProjectFixture()).success).toBe(true);
+  });
+
+  it('requires schemaVersion', () => {
+    const { ai: _ai, schemaVersion: _schemaVersion, ...draft } = validProjectFixture();
+
+    expect(DraftProjectSchema.safeParse(draft).success).toBe(false);
+    expect(StoredProjectSchema.safeParse(draft).success).toBe(false);
+  });
+
+  it('rejects an unsupported schemaVersion', () => {
+    const { ai: _ai, ...draft } = validProjectFixture();
+
+    expect(DraftProjectSchema.safeParse({ ...draft, schemaVersion: '2.0.0' }).success).toBe(false);
+    expect(StoredProjectSchema.safeParse({ ...draft, schemaVersion: '2.0.0' }).success).toBe(false);
   });
 });

@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { SceneSchema, TimelineClipSchema, VideoProjectSchema } from './schema';
+import {
+  DraftProjectSchema,
+  SceneSchema,
+  StoredProjectSchema,
+  TimelineClipSchema,
+  VideoProjectSchema,
+} from './schema';
 
 export type JsonSchema = z.core.JSONSchema.BaseSchema;
 
@@ -31,7 +37,9 @@ export function getJsonSchema(schema: z.ZodType): JsonSchema {
 }
 
 export const JSON_SCHEMA_EXPORTS = {
+  draftProject: DraftProjectSchema,
   scene: SceneSchema,
+  storedProject: StoredProjectSchema,
   timelineClip: TimelineClipSchema,
   videoProject: VideoProjectSchema,
 } as const;

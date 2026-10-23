@@ -158,6 +158,8 @@
 
 **依赖**：T03
 
+**状态**：部分完成。工程 CRUD、原子写入、`schemaVersion` 校验、`DraftProjectSchema`/`StoredProjectSchema` 与 IPC 通道已落地；自动保存调度、备份/恢复、素材重定位和项目锁待实现。
+
 **交付物**：ProjectStore、`DraftProjectSchema`、自动保存调度器、备份/恢复、项目锁、测试。
 
 **验收标准**

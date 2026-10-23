@@ -58,6 +58,14 @@ pnpm make             # 生成 Windows 安装包
 - `#/editor` 四轨编辑器
 - `#/status` 脚手架状态页
 
+## 项目文件与 IPC
+
+- 工程文件位于 `defaultProjectDirectory/<projectId>/project.json`，包含 `schemaVersion`（当前 `1.0.0`）。
+- 渲染进程只通过 `window.miaoma.project` 调用 `list` / `get` / `create` / `update` / `delete`。
+- IPC 通道：`project:list`、`project:get`、`project:create`、`project:update`、`project:delete`。
+- 写入使用临时文件 + rename；项目 ID 经过白名单校验，所有操作限制在工程根目录内。
+- 主进程只返回结构化 `IpcResponse`，不向渲染进程暴露文件路径、原始异常或 `ipcRenderer`。
+
 ## 文档
 
 - [需求文档 v1.1](docs/requirements/花生AI_妙剪Magicut_需求文档_v1.1.md)

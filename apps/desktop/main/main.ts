@@ -141,7 +141,10 @@ function registerIpcHandlers(): void {
       const ffprobePath = resolveFfprobeExecutable();
 
       if (!isBinaryAvailable(ffprobePath)) {
-        throw new IpcError('ASSET_PROBE_UNAVAILABLE', '未找到 ffprobe，暂时无法解析视频元数据。');
+        throw new IpcError(
+          'ASSET_PROBE_UNAVAILABLE',
+          '未找到 ffprobe。请将 ffprobe.exe 放入 resources/ffmpeg/，或设置 MIAOMA_FFPROBE_PATH。',
+        );
       }
 
       prepared = await prepareProjectAssets(trimmedAssetPath, (candidate) =>

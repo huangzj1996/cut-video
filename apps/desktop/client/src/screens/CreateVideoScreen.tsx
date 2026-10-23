@@ -156,6 +156,19 @@ export function CreateVideoScreen() {
             </span>
             <span className="cr-nav-label">项目</span>
           </button>
+
+          <button
+            className="cr-nav-item"
+            type="button"
+            onClick={() => {
+              window.location.hash = '#/llm-test';
+            }}
+          >
+            <span className="cr-nav-icon">
+              <EditorIcon name="sparkles" size={20} />
+            </span>
+            <span className="cr-nav-label">测试</span>
+          </button>
         </nav>
       </aside>
 

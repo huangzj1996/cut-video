@@ -10,6 +10,42 @@
 
 这些模块只依赖 Node 内置模块，由调用方传入 ffmpeg/ffprobe 路径，可在 Electron 主进程、utilityProcess 或测试中复用。
 
+## LLM Provider（`./llm`）
+
+通过子路径 `@miaoma/video-agent/llm` 引入，不从包根 barrel 导出，避免只是导入媒体能力时把 LangChain 一并带入 bundle。
+
+```ts
+import { chat, createDeepSeekProviderFromEnv } from '@miaoma/video-agent/llm';
+
+const provider = createDeepSeekProviderFromEnv();
+const result = await chat(provider, '你好');
+console.log(result.text);
+```
+
+- `LlmProvider` 当前提供两个基础方法：
+  - `generate(messages, options?)`：非流式对话，返回文本、`reasoning`、usage、finishReason。
+  - `stream(messages, options?)`：SSE 流式事件（`reasoning` / `content` / `usage` / `done`）。
+- `chat(provider, input, options?)` 是基础对话封装：字符串输入会自动组装 system + user 消息；也接受完整消息历史。
+- `createDeepSeekProvider(config)` 使用 ChatOpenAI + DeepSeek 兼容接口，默认 `https://api.deepseek.com`、`deepseek-chat`、120s 超时。
+  - 显式 `maxRetries: 0`，禁用 LangChain `AsyncCaller` 与 SDK 重试；重试预算留给后续工作流层。
+  - 错误统一为 `LlmError`（认证、余额、权限、限流、上下文溢出、超时、取消、网络、空响应等），消息为安全中文，不包含 key、prompt 或原始响应。
+  - 显式传入 API Key，并阻断 `OPENAI_API_KEY` / `OPENAI_ORG_ID` / `OPENAI_PROJECT_ID` 回退。
+- 结构化输出（function calling / jsonMode）暂未实现，后续在 Provider 之上单独设计。
+
+开发态环境变量（仓库根 `.env`）：
+
+```dotenv
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+```
+
+真实 API 冒烟测试默认跳过；显式开启：
+
+```bash
+MIAOMA_LLM_LIVE=1 pnpm --filter @miaoma/video-agent exec vitest run src/llm/deepseek.live.test.ts
+```
+
 ## LangGraph 工作流契约
 
 T01 只建立稳定的节点/阶段契约：

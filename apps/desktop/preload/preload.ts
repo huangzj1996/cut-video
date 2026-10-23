@@ -27,6 +27,9 @@ const api: MiaomaApi = {
     list: () => invoke(IPC_CHANNELS.project.list),
     update: (input) => invoke(IPC_CHANNELS.project.update, input),
   },
+  llm: {
+    chat: (messages) => invoke(IPC_CHANNELS.llm.chat, messages),
+  },
 };
 
 contextBridge.exposeInMainWorld('miaoma', api);

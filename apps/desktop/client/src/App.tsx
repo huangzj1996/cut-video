@@ -4,6 +4,7 @@ import { IpcClientError, unwrapIpc } from './lib/ipc';
 import { CreateChatScreen } from './screens/CreateChatScreen';
 import { CreateVideoScreen } from './screens/CreateVideoScreen';
 import { EditorVideoScreen } from './screens/EditorVideoScreen';
+import { LlmTestScreen } from './screens/LlmTestScreen';
 import { WorkspaceScreen } from './screens/WorkspaceScreen';
 
 function formatPlatform(platform: string): string {
@@ -307,6 +308,20 @@ function StatusScreen() {
           </article>
 
           <article className="card card-wide">
+            <h3>LLM 测试</h3>
+            <p>在页面直接输入消息，验证 DeepSeek 基础对话调用与错误处理。</p>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                window.location.hash = '#/llm-test';
+              }}
+            >
+              打开测试台
+            </button>
+          </article>
+
+          <article className="card card-wide">
             <h3>下一步</h3>
             <ol className="next-list">
               <li>
@@ -367,6 +382,10 @@ function App() {
 
   if (hash === '#/editor') {
     return <EditorVideoScreen />;
+  }
+
+  if (hash === '#/llm-test') {
+    return <LlmTestScreen />;
   }
 
   return <CreateVideoScreen />;

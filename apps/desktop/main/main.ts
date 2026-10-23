@@ -5,6 +5,13 @@ import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import started from 'electron-squirrel-startup';
 import { extractKeyframes, probeVideoResult } from '@miaoma/video-agent';
 import {
+  chat,
+  createDeepSeekProviderFromEnv,
+  LlmError,
+  type LlmMessage,
+  type LlmProvider,
+} from '@miaoma/video-agent/llm';
+import {
   IPC_CHANNELS,
   type AppInfo,
   type AppSettings,
@@ -76,6 +83,79 @@ function resolveFfmpegExecutable(): string {
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     name: 'ffmpeg',
+  });
+}
+
+/**
+ * 开发态从仓库根 `.env` 读取 DeepSeek 配置。
+ * 打包态不读取 `.env`，后续由 settings + safeStorage 注入密钥。
+ */
+function loadDevelopmentEnv(): void {
+  if (app.isPackaged) {
+    return;
+  }
+
+  const candidates = [
+    path.resolve(app.getAppPath(), '../..', '.env'),
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../..', '.env'),
+  ];
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    try {
+      process.loadEnvFile(candidate);
+    } catch {
+      // 读取失败时保持现有环境变量，由 LLM 调用返回明确错误。
+    }
+
+    return;
+  }
+}
+
+let llmProvider: LlmProvider | undefined;
+
+function getLlmProvider(): LlmProvider {
+  if (!llmProvider) {
+    llmProvider = createDeepSeekProviderFromEnv();
+  }
+
+  return llmProvider;
+}
+
+function parseLlmMessages(raw: unknown): LlmMessage[] {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 50) {
+    throw new IpcError('LLM_INVALID_ARGUMENT', '对话消息无效。');
+  }
+
+  let totalCharacters = 0;
+
+  return raw.map((entry) => {
+    if (entry === null || typeof entry !== 'object') {
+      throw new IpcError('LLM_INVALID_ARGUMENT', '对话消息无效。');
+    }
+
+    const role = (entry as { role?: unknown }).role;
+    const content = (entry as { content?: unknown }).content;
+
+    if (role !== 'system' && role !== 'user' && role !== 'assistant') {
+      throw new IpcError('LLM_INVALID_ARGUMENT', '对话角色无效。');
+    }
+
+    if (typeof content !== 'string' || content.trim().length === 0) {
+      throw new IpcError('LLM_INVALID_ARGUMENT', '对话内容不能为空。');
+    }
+
+    totalCharacters += content.length;
+
+    if (totalCharacters > 20_000) {
+      throw new IpcError('LLM_INVALID_ARGUMENT', '对话内容过长。');
+    }
+
+    return { content, role };
   });
 }
 
@@ -204,6 +284,52 @@ function registerIpcHandlers(): void {
 
     return project;
   });
+
+  handle(IPC_CHANNELS.llm.chat, async (rawMessages) => {
+    const messages = parseLlmMessages(rawMessages);
+    let provider: LlmProvider;
+
+    try {
+      provider = getLlmProvider();
+    } catch (error) {
+      if (error instanceof LlmError && error.code === 'LLM_CONFIG_MISSING_API_KEY') {
+        throw new IpcError('LLM_NOT_CONFIGURED', error.message, false);
+      }
+
+      throw new IpcError('LLM_NOT_CONFIGURED', '模型配置无效。', false);
+    }
+
+    try {
+      const result = await chat(provider, messages);
+      const usage = result.usage
+        ? {
+            ...(result.usage.inputTokens !== undefined
+              ? { inputTokens: result.usage.inputTokens }
+              : {}),
+            ...(result.usage.outputTokens !== undefined
+              ? { outputTokens: result.usage.outputTokens }
+              : {}),
+            ...(result.usage.totalTokens !== undefined
+              ? { totalTokens: result.usage.totalTokens }
+              : {}),
+          }
+        : undefined;
+
+      return {
+        model: result.model,
+        reply: result.text,
+        ...(usage ? { usage } : {}),
+      };
+    } catch (error) {
+      if (error instanceof LlmError) {
+        throw new IpcError('LLM_REQUEST_FAILED', error.message, error.retryable, {
+          llmCode: error.code,
+        });
+      }
+
+      throw new IpcError('LLM_REQUEST_FAILED', '模型调用失败。', false);
+    }
+  });
 }
 
 function createWindow(): void {
@@ -243,6 +369,7 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  loadDevelopmentEnv();
   Menu.setApplicationMenu(null);
   registerIpcHandlers();
   createWindow();

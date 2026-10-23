@@ -57,6 +57,23 @@ export interface ProjectDeleteResult {
   projectId: string;
 }
 
+export interface LlmChatMessage {
+  content: string;
+  role: 'system' | 'user' | 'assistant';
+}
+
+export interface LlmChatUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
+export interface LlmChatResult {
+  model: string;
+  reply: string;
+  usage?: LlmChatUsage;
+}
+
 export type IpcErrorCode =
   | 'IPC_INVALID_ARGUMENT'
   | 'IPC_UNAVAILABLE'
@@ -78,7 +95,10 @@ export type IpcErrorCode =
   | 'ASSET_PROBE_FAILED'
   | 'ASSET_PROBE_UNAVAILABLE'
   | 'ASSET_KEYFRAME_UNAVAILABLE'
-  | 'ASSET_MANIFEST_WRITE_FAILED';
+  | 'ASSET_MANIFEST_WRITE_FAILED'
+  | 'LLM_INVALID_ARGUMENT'
+  | 'LLM_NOT_CONFIGURED'
+  | 'LLM_REQUEST_FAILED';
 
 export interface IpcErrorPayload {
   code: IpcErrorCode;
@@ -134,6 +154,10 @@ export interface IpcInvokeContract {
     params: [projectId: string];
     result: ProjectDeleteResult;
   };
+  'llm:chat': {
+    params: [messages: LlmChatMessage[]];
+    result: LlmChatResult;
+  };
 }
 
 export type IpcChannel = keyof IpcInvokeContract;
@@ -165,6 +189,9 @@ export const IPC_CHANNELS = {
     list: 'project:list' satisfies IpcChannel,
     update: 'project:update' satisfies IpcChannel,
   },
+  llm: {
+    chat: 'llm:chat' satisfies IpcChannel,
+  },
 } as const satisfies Record<string, Record<string, IpcChannel>>;
 
 export interface MiaomaProjectApi {
@@ -175,10 +202,15 @@ export interface MiaomaProjectApi {
   delete(projectId: string): Promise<IpcResponse<IpcResult<'project:delete'>>>;
 }
 
+export interface MiaomaLlmApi {
+  chat(messages: LlmChatMessage[]): Promise<IpcResponse<IpcResult<'llm:chat'>>>;
+}
+
 export interface MiaomaApi {
   ping(): Promise<IpcResponse<IpcResult<'app:ping'>>>;
   getAppInfo(): Promise<IpcResponse<IpcResult<'app:get-info'>>>;
   getSettings(): Promise<IpcResponse<IpcResult<'settings:get'>>>;
   getMediaInfo(): Promise<IpcResponse<IpcResult<'media:get-info'>>>;
   project: MiaomaProjectApi;
+  llm: MiaomaLlmApi;
 }

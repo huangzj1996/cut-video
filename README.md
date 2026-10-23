@@ -56,7 +56,8 @@ pnpm make             # 生成 Windows 安装包
 - `#/workspace` 工作台
 - `#/create-chat` 创作消息页
 - `#/editor` 四轨编辑器
-- `#/status` 脚手架状态页
+- `#/llm-test` LLM 基础对话测试台
+- `#/status` 脚手架状态页（含测试台入口）
 
 ## 项目文件与 IPC
 
@@ -68,6 +69,7 @@ pnpm make             # 生成 Windows 安装包
 - 创作页可输入本机视频素材目录或文件路径；点击创建时扫描并按 ffprobe 解析时长、显示/编码分辨率、帧率、编码、旋转、VFR、HDR、码率和音频流等元数据，`ProjectAssets` 保存时间线字段，完整探测结果写入 `inputs/assets.json`。
 - 元数据与关键帧能力位于 `@miaoma/video-agent` 的 `src/media/`：视频按每 5 秒一帧、最多 8 帧动态抽帧，长边不超过 768，输出 JPEG；关键帧按文件内容 SHA-256 缓存到 `<project>/cache/keyframes`，映射为 `ThumbnailAsset` 并由 `VideoAsset.thumbnailIds` 引用。损坏文件、不支持格式、权限不足、超时等错误按视频隔离并记录原因，不阻断其他素材。
 - ffprobe 或 ffmpeg 未配置时，创建带素材的工程会返回明确错误。
+- LLM 基础对话：`@miaoma/video-agent/llm` 提供 `LlmProvider`（`generate` / `stream`）与 DeepSeek 适配器；桌面端通过 `llm:chat` IPC 在主进程调用，页面入口为 `#/llm-test`。开发态从仓库根 `.env` 读取 `DEEPSEEK_API_KEY`，修改后需重启应用。
 
 ## 文档
 

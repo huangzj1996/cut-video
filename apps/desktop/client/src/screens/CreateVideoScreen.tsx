@@ -1,23 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  CanvasConfigSchema,
-  PROJECT_SCHEMA_VERSION,
-  type CanvasConfig,
-  type ProjectMetadata,
-  type VoiceClip,
-} from '@miaoma/video-project';
+import type { VoiceClip } from '@miaoma/video-project';
 import brandMarkUrl from '../assets/brand-mark.png';
 import { EditorIcon } from './editor-icons';
 import './create-video.css';
 
 const MAX_SCRIPT_LENGTH = 10_000;
-
-const CANVAS_CONFIG: CanvasConfig = CanvasConfigSchema.parse({
-  aspectRatio: '16:9',
-  fps: 30,
-  height: 1080,
-  width: 1920,
-});
 
 interface VoicePreset {
   description: string;
@@ -33,14 +20,6 @@ const VOICE_PRESETS: readonly VoicePreset[] = [
 ];
 
 const DEFAULT_VOICE = VOICE_PRESETS[0]!;
-
-interface CreationDraft {
-  canvas: CanvasConfig;
-  project: ProjectMetadata;
-  schemaVersion: typeof PROJECT_SCHEMA_VERSION;
-  script: string;
-  voicePreset: VoiceClip['voicePreset'];
-}
 
 export function CreateVideoScreen() {
   const [script, setScript] = useState('');
@@ -95,32 +74,13 @@ export function CreateVideoScreen() {
   }, [voiceOpen]);
 
   const handleCreate = useCallback(() => {
-    const trimmed = script.trim();
-
-    if (!trimmed) {
+    if (!script.trim()) {
       notify('请先输入视频文稿');
       return;
     }
 
-    const now = new Date().toISOString();
-    const draft: CreationDraft = {
-      canvas: CANVAS_CONFIG,
-      project: {
-        contentRevision: 0,
-        createdAt: now,
-        name: '未命名创作',
-        projectId: crypto.randomUUID(),
-        updatedAt: now,
-      },
-      schemaVersion: PROJECT_SCHEMA_VERSION,
-      script: trimmed,
-      voicePreset: selectedVoice.id,
-    };
-
-    notify(
-      `草稿已就绪 · v${draft.schemaVersion} · ${draft.canvas.width}×${draft.canvas.height} · ${selectedVoice.name}`,
-    );
-  }, [notify, script, selectedVoice]);
+    window.location.hash = '#/create-chat';
+  }, [notify, script]);
 
   return (
     <div className="create-screen">
@@ -157,7 +117,13 @@ export function CreateVideoScreen() {
             <span className="cr-nav-label">创作</span>
           </button>
 
-          <button className="cr-nav-item" disabled title="后续任务" type="button">
+          <button
+            className="cr-nav-item"
+            type="button"
+            onClick={() => {
+              window.location.hash = '#/workspace';
+            }}
+          >
             <span className="cr-nav-icon">
               <EditorIcon name="folder" size={20} />
             </span>

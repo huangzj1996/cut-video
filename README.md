@@ -2,7 +2,7 @@
 
 AI 视频创作桌面工具：本地素材 + 文稿 → 聊天式需求确认 → 四阶段生成（准备、分镜、配音、视频） → 四轨编辑 → 预览 → 导出 16:9 MP4。
 
-当前处于 **T01 工程脚手架** 阶段：Electron + React + TypeScript + Vite + Forge + pnpm workspace。业务功能尚未实现；已按原型落地编辑器「画面 / 口播 / 字幕 / 音乐」四个静态面板（mock 数据，不含真实预览、时间线编辑与导出）。
+当前处于 **T01 工程脚手架** 阶段：Electron + React + TypeScript + Vite + Forge + pnpm workspace。业务功能尚未实现；已按原型落地创作页、工作台、创作消息页，以及编辑器「画面 / 口播 / 字幕 / 音乐」四个静态视图（mock 数据，不含真实 AI、持久化、预览、时间线编辑与导出）。
 
 ## 项目结构
 
@@ -49,6 +49,14 @@ pnpm format           # Prettier
 pnpm package          # 打包 Electron 应用（不生成安装包）
 pnpm make             # 生成 Windows 安装包
 ```
+
+## 页面路由
+
+- `#/create` 创作页（默认）
+- `#/workspace` 工作台
+- `#/create-chat` 创作消息页
+- `#/editor` 四轨编辑器
+- `#/status` 脚手架状态页
 
 ## 文档
 

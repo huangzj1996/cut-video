@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AppInfo, AppSettings, MediaInfo } from '../../shared/ipc-contract';
 import { IpcClientError, unwrapIpc } from './lib/ipc';
+import { CreateChatScreen } from './screens/CreateChatScreen';
 import { CreateVideoScreen } from './screens/CreateVideoScreen';
 import { EditorVideoScreen } from './screens/EditorVideoScreen';
+import { WorkspaceScreen } from './screens/WorkspaceScreen';
 
 function formatPlatform(platform: string): string {
   const labels: Record<string, string> = {
@@ -353,6 +355,14 @@ function App() {
 
   if (hash === '#/status') {
     return <StatusScreen />;
+  }
+
+  if (hash === '#/workspace') {
+    return <WorkspaceScreen />;
+  }
+
+  if (hash === '#/create-chat') {
+    return <CreateChatScreen />;
   }
 
   if (hash === '#/editor') {

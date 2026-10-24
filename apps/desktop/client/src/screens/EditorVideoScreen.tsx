@@ -4,7 +4,19 @@
  * 当前使用 mock 数据，不含真实预览、时间线编辑、工作流与导出。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
+import { PreviewStage } from './editor-video/PreviewStage';
+import {
+  clampTime,
+  clientXToTime,
+  formatTime,
+  secondsToPercent,
+  type TimelineClip,
+} from './editor-video/timeline';
 import { EditorIcon, type EditorIconName } from './editor-icons';
 import { MusicPanel } from './panels/MusicPanel';
 import { SubtitlePanel } from './panels/SubtitlePanel';
@@ -73,22 +85,14 @@ const STORYBOARDS: readonly StoryboardClip[] = [
   },
 ];
 
-interface VideoBar {
-  id: string;
-  label: string;
-  left: string;
-  width: string;
-  background: string;
+interface VideoBar extends TimelineClip {
   border: string;
-  accent: string;
 }
 
-const VIDEO_BARS: readonly VideoBar[] = [
+const VIDEO_BAR_STYLES = [
   {
     id: 'video-01',
     label: '分镜01',
-    left: '0.7%',
-    width: '12.47%',
     background: '#1f6158',
     border: '#25d0b1',
     accent: '#25d0b1',
@@ -96,8 +100,6 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-02',
     label: '分镜02',
-    left: '13.17%',
-    width: '11.4%',
     background: '#294673',
     border: 'rgba(255,255,255,0.125)',
     accent: '#5b8cff',
@@ -105,8 +107,6 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-03',
     label: '分镜03',
-    left: '24.57%',
-    width: '11.28%',
     background: '#503984',
     border: 'rgba(255,255,255,0.125)',
     accent: '#8b6af7',
@@ -114,8 +114,6 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-04',
     label: '分镜04',
-    left: '35.85%',
-    width: '11.92%',
     background: '#74313e',
     border: 'rgba(255,255,255,0.125)',
     accent: '#f05f73',
@@ -123,27 +121,51 @@ const VIDEO_BARS: readonly VideoBar[] = [
   {
     id: 'video-05',
     label: '分镜05',
-    left: '47.77%',
-    width: '12.21%',
     background: '#3d3f45',
     border: 'rgba(255,255,255,0.125)',
     accent: '#7e848e',
   },
-];
+] as const;
+
+// 片段只铺满工程时长 00:00-01:27；之后到标尺末端是空白死区。
+const VIDEO_BARS: readonly VideoBar[] = VIDEO_BAR_STYLES.map((bar, index, all) => ({
+  ...bar,
+  startSeconds: (index * TOTAL_SECONDS) / all.length,
+  endSeconds: ((index + 1) * TOTAL_SECONDS) / all.length,
+}));
 
 interface VoiceBar {
   id: string;
   label: string;
-  left: string;
-  width: string;
+  startSeconds: number;
+  endSeconds: number;
   waveBars: number;
   pause?: boolean;
 }
 
 const VOICE_BARS: readonly VoiceBar[] = [
-  { id: 'voice-01', label: 'IndexTTS2 口播', left: '0.7%', width: '24.42%', waveBars: 16 },
-  { id: 'voice-02', label: '停顿', left: '25.12%', width: '3.84%', waveBars: 2, pause: true },
-  { id: 'voice-03', label: '旁白 02', left: '28.96%', width: '19.19%', waveBars: 13 },
+  {
+    id: 'voice-01',
+    label: 'IndexTTS2 口播',
+    startSeconds: 0,
+    endSeconds: TOTAL_SECONDS * 0.52,
+    waveBars: 16,
+  },
+  {
+    id: 'voice-02',
+    label: '停顿',
+    startSeconds: TOTAL_SECONDS * 0.52,
+    endSeconds: TOTAL_SECONDS * 0.6,
+    waveBars: 2,
+    pause: true,
+  },
+  {
+    id: 'voice-03',
+    label: '旁白 02',
+    startSeconds: TOTAL_SECONDS * 0.6,
+    endSeconds: TOTAL_SECONDS,
+    waveBars: 13,
+  },
 ];
 
 const WAVE_HEIGHTS = [8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8];
@@ -197,14 +219,7 @@ const TIMELINE_TOOLS: readonly { id: TimelineToolId; label: string; icon: Editor
   { id: 'wave', label: '波形', icon: 'wave' },
 ];
 
-function formatTime(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const rest = total % 60;
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
-}
+const CONTENT_END_PERCENT = secondsToPercent(TOTAL_SECONDS, TIMELINE_SPAN_SECONDS);
 
 function Waveform({ count }: { count: number }) {
   return (
@@ -231,7 +246,11 @@ export function EditorVideoScreen() {
     wave: false,
   });
   const [notice, setNotice] = useState<string | null>(null);
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rulerTrackRef = useRef<HTMLDivElement>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const grabOffsetRef = useRef(0);
   const noticeTimer = useRef<number | null>(null);
 
   const selectedClip = STORYBOARDS.find((clip) => clip.id === selectedClipId);
@@ -281,22 +300,105 @@ export function EditorVideoScreen() {
     }
   }, [currentTime, playing]);
 
-  const handleSeek = (event: MouseEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const seekFromClientX = useCallback((clientX: number, offsetSeconds: number) => {
+    const rect = rulerTrackRef.current?.getBoundingClientRect();
 
-    setCurrentTime(Math.min(TOTAL_SECONDS, fraction * TIMELINE_SPAN_SECONDS));
-  };
+    if (!rect) {
+      return;
+    }
 
-  const handleSeekKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+    const time = clientXToTime(clientX, rect, TIMELINE_SPAN_SECONDS) + offsetSeconds;
+
+    setCurrentTime(clampTime(time, TIMELINE_SPAN_SECONDS));
+  }, []);
+
+  const endScrub = useCallback((event?: ReactPointerEvent<HTMLDivElement>) => {
+    if (event && activePointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    activePointerIdRef.current = null;
+    grabOffsetRef.current = 0;
+    setIsScrubbing(false);
+  }, []);
+
+  const handleTimelinePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary) {
+      return;
+    }
+
+    const target = event.target as Element;
+
+    if (target.closest('.ed-ruler-label, .ed-track-label')) {
       return;
     }
 
     event.preventDefault();
-    const step = event.key === 'ArrowLeft' ? -1 : 1;
+    setPlaying(false);
+    rulerTrackRef.current?.focus({ preventScroll: true });
 
-    setCurrentTime((time) => Math.min(TOTAL_SECONDS, Math.max(0, time + step)));
+    if (activePointerIdRef.current !== null) {
+      endScrub();
+    }
+
+    activePointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsScrubbing(true);
+
+    if (target.closest('.ed-playhead')) {
+      const rect = rulerTrackRef.current?.getBoundingClientRect();
+      const pointerTime = rect ? clientXToTime(event.clientX, rect, TIMELINE_SPAN_SECONDS) : 0;
+
+      grabOffsetRef.current = currentTime - pointerTime;
+      return;
+    }
+
+    grabOffsetRef.current = 0;
+    seekFromClientX(event.clientX, 0);
+  };
+
+  const handleTimelinePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activePointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    if ((event.buttons & 1) === 0) {
+      endScrub(event);
+      return;
+    }
+
+    seekFromClientX(event.clientX, grabOffsetRef.current);
+  };
+
+  const handleSeekKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    let nextTime: number;
+
+    switch (event.key) {
+      case 'ArrowLeft':
+        nextTime = currentTime - 1;
+        break;
+      case 'ArrowRight':
+        nextTime = currentTime + 1;
+        break;
+      case 'PageDown':
+        nextTime = currentTime - 10;
+        break;
+      case 'PageUp':
+        nextTime = currentTime + 10;
+        break;
+      case 'Home':
+        nextTime = 0;
+        break;
+      case 'End':
+        nextTime = TIMELINE_SPAN_SECONDS;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setPlaying(false);
+    setCurrentTime(clampTime(nextTime, TIMELINE_SPAN_SECONDS));
   };
 
   const scrollToBottom = () => {
@@ -399,7 +501,11 @@ export function EditorVideoScreen() {
         </aside>
 
         <section className="ed-center" aria-label="视频预览">
-          <div className="ed-preview" role="img" aria-label="视频预览区域（透明棋盘）" />
+          <PreviewStage
+            clips={VIDEO_BARS}
+            currentTime={currentTime}
+            projectSeconds={TOTAL_SECONDS}
+          />
           <div className="ed-preview-bar">
             <span className="ed-preview-time">
               {formatTime(currentTime)} <span>/ {formatTime(TOTAL_SECONDS)}</span>
@@ -672,19 +778,28 @@ export function EditorVideoScreen() {
         </div>
 
         <div className="ed-timeline-body">
-          <div className="ed-timeline-canvas" style={{ width: `${zoomScale * 100}%` }}>
+          <div
+            className={`ed-timeline-canvas${isScrubbing ? ' is-scrubbing' : ''}`}
+            style={{ width: `${zoomScale * 100}%` }}
+            onLostPointerCapture={endScrub}
+            onPointerCancel={endScrub}
+            onPointerDown={handleTimelinePointerDown}
+            onPointerMove={handleTimelinePointerMove}
+            onPointerUp={endScrub}
+          >
             <div className="ed-ruler">
               <div className="ed-ruler-label" />
               <div
                 className="ed-ruler-track"
+                ref={rulerTrackRef}
                 role="slider"
                 tabIndex={0}
                 aria-label="播放头位置"
+                aria-orientation="horizontal"
                 aria-valuemin={0}
-                aria-valuemax={TOTAL_SECONDS}
-                aria-valuenow={Math.round(currentTime)}
+                aria-valuemax={TIMELINE_SPAN_SECONDS}
+                aria-valuenow={Math.min(TIMELINE_SPAN_SECONDS, Math.round(currentTime * 10) / 10)}
                 aria-valuetext={formatTime(currentTime)}
-                onClick={handleSeek}
                 onKeyDown={handleSeekKey}
               >
                 {TICKS.map((tick, index) => (
@@ -713,8 +828,8 @@ export function EditorVideoScreen() {
                     key={bar.id}
                     className="ed-video-bar"
                     style={{
-                      left: bar.left,
-                      width: bar.width,
+                      left: `${secondsToPercent(bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
+                      width: `${secondsToPercent(bar.endSeconds - bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
                       background: bar.background,
                       borderColor: bar.border,
                     }}
@@ -745,7 +860,10 @@ export function EditorVideoScreen() {
                   <div
                     key={bar.id}
                     className={`ed-voice-bar${bar.pause ? ' is-pause' : ''}`}
-                    style={{ left: bar.left, width: bar.width }}
+                    style={{
+                      left: `${secondsToPercent(bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
+                      width: `${secondsToPercent(bar.endSeconds - bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
+                    }}
                   >
                     <span className="ed-voice-name">{bar.label}</span>
                     <Waveform count={bar.waveBars} />
@@ -763,7 +881,10 @@ export function EditorVideoScreen() {
                 </span>
               </div>
               <div className="ed-track-content">
-                <div className="ed-subtitle-bar" style={{ left: '0.7%', width: '44.19%' }}>
+                <div
+                  className="ed-subtitle-bar"
+                  style={{ left: '0%', width: `${CONTENT_END_PERCENT}%` }}
+                >
                   <EditorIcon name="subtitles" size={16} />
                   <span>Whisper 字幕 · 自动断句 · 可逐字微调</span>
                 </div>
@@ -779,7 +900,10 @@ export function EditorVideoScreen() {
                 </span>
               </div>
               <div className="ed-track-content">
-                <div className="ed-tl-music-bar" style={{ left: '0.7%', width: '59.28%' }}>
+                <div
+                  className="ed-tl-music-bar"
+                  style={{ left: '0%', width: `${CONTENT_END_PERCENT}%` }}
+                >
                   <span className="ed-bar-accent" style={{ background: 'var(--ed-blue)' }} />
                   <EditorIcon name="music" size={15} />
                   <span className="ed-tl-music-name">Eutopia</span>
@@ -790,7 +914,7 @@ export function EditorVideoScreen() {
               </div>
             </div>
 
-            <div className="ed-playhead-layer">
+            <div aria-hidden="true" className="ed-playhead-layer">
               <div className="ed-playhead" style={{ left: `${playheadRatio * 100}%` }}>
                 <span className="ed-playhead-handle" />
               </div>

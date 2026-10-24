@@ -2,10 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AppInfo, AppSettings, MediaInfo } from '../../shared/ipc-contract';
 import { IpcClientError, unwrapIpc } from './lib/ipc';
 import { CreateChatScreen } from './screens/CreateChatScreen';
-import { CreateVideoScreen } from './screens/CreateVideoScreen';
 import { EditorVideoScreen } from './screens/EditorVideoScreen';
+import { HomeScreen } from './screens/HomeScreen';
 import { LlmTestScreen } from './screens/LlmTestScreen';
-import { WorkspaceScreen } from './screens/WorkspaceScreen';
 
 function formatPlatform(platform: string): string {
   const labels: Record<string, string> = {
@@ -373,7 +372,11 @@ function App() {
   }
 
   if (hash === '#/workspace') {
-    return <WorkspaceScreen />;
+    return <HomeScreen activeTab="projects" />;
+  }
+
+  if (hash === '#/create') {
+    return <HomeScreen activeTab="create" />;
   }
 
   if (hash === '#/create-chat') {
@@ -396,7 +399,7 @@ function App() {
     return <LlmTestScreen />;
   }
 
-  return <CreateVideoScreen />;
+  return <HomeScreen activeTab="create" />;
 }
 
 export default App;

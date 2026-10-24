@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectSummary } from '../../../shared/ipc-contract';
-import brandMarkUrl from '../assets/brand-mark.png';
 import projectAiAdvancedUrl from '../assets/workspace/project-ai-advanced.jpg';
 import projectAiLearningUrl from '../assets/workspace/project-ai-learning.jpg';
 import projectCeoInterviewUrl from '../assets/workspace/project-ceo-interview.jpg';
@@ -9,7 +8,6 @@ import projectGameTrailerUrl from '../assets/workspace/project-game-trailer.jpg'
 import projectLivestreamUrl from '../assets/workspace/project-livestream.jpg';
 import projectSaasLaunchUrl from '../assets/workspace/project-saas-launch.jpg';
 import { unwrapIpc } from '../lib/ipc';
-import { EditorIcon } from './editor-icons';
 import './workspace.css';
 
 interface ProjectItem {
@@ -227,7 +225,7 @@ function ProjectCard({ onDelete, onNotify, onOpen, project }: ProjectCardProps) 
   );
 }
 
-export function WorkspaceScreen() {
+export function WorkspaceScreen({ active = true }: { active?: boolean }) {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [listState, setListState] = useState<'error' | 'loading' | 'ready'>('loading');
   const [notice, setNotice] = useState<string | null>(null);
@@ -235,7 +233,6 @@ export function WorkspaceScreen() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
-  const mainRef = useRef<HTMLElement>(null);
   const cancelDeleteRef = useRef<HTMLButtonElement>(null);
 
   const notify = useCallback((message: string) => {
@@ -272,8 +269,10 @@ export function WorkspaceScreen() {
   }, [notify]);
 
   useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
+    if (active) {
+      void loadProjects();
+    }
+  }, [active, loadProjects]);
 
   useEffect(() => {
     return () => {
@@ -342,60 +341,9 @@ export function WorkspaceScreen() {
     }
   }, [deleting, loadProjects, notify, pendingDelete]);
 
-  const scrollToTop = () => {
-    mainRef.current?.scrollTo({ behavior: 'smooth', top: 0 });
-  };
-
   return (
     <div className="ws-screen">
-      <aside className="ws-sidebar">
-        <div aria-hidden="true" className="ws-sidebar-glow" />
-        <div aria-hidden="true" className="ws-sidebar-orb" />
-
-        <div className="ws-brand">
-          <img alt="" className="ws-brand-mark" src={brandMarkUrl} />
-          <span className="ws-brand-copy">
-            <strong>妙剪 Magicut</strong>
-            <small>智能视频剪辑工具</small>
-          </span>
-        </div>
-
-        <nav aria-label="主导航" className="ws-capsule">
-          <button className="ws-nav-item" disabled title="后续任务" type="button">
-            <span className="ws-nav-icon">
-              <EditorIcon name="home" size={20} />
-            </span>
-            <span className="ws-nav-label">首页</span>
-          </button>
-
-          <button
-            className="ws-nav-item ws-nav-item--link"
-            type="button"
-            onClick={() => {
-              window.location.hash = '#/create';
-            }}
-          >
-            <span className="ws-nav-icon">
-              <EditorIcon name="scissors" size={22} />
-            </span>
-            <span className="ws-nav-label">创作</span>
-          </button>
-
-          <button
-            aria-current="page"
-            className="ws-nav-item ws-nav-item--active"
-            type="button"
-            onClick={scrollToTop}
-          >
-            <span className="ws-nav-icon">
-              <EditorIcon name="folder" size={20} />
-            </span>
-            <span className="ws-nav-label">项目</span>
-          </button>
-        </nav>
-      </aside>
-
-      <main className="ws-main" ref={mainRef}>
+      <div className="ws-main">
         <div className="ws-content">
           <header className="ws-heading">
             <h1>所有项目</h1>
@@ -465,7 +413,7 @@ export function WorkspaceScreen() {
             {notice}
           </div>
         ) : null}
-      </main>
+      </div>
 
       {pendingDelete ? (
         <div

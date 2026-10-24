@@ -17,6 +17,11 @@
       "types": "./src/llm/index.ts",
       "import": "./src/llm/index.ts",
       "default": "./src/llm/index.ts"
+    },
+    "./workflow": {
+      "types": "./src/workflow/index.ts",
+      "import": "./src/workflow/index.ts",
+      "default": "./src/workflow/index.ts"
     }
   },
   "files": [

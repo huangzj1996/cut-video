@@ -10,7 +10,21 @@
  * 3. 主进程用 `handle()` 注册，Preload 用 `invoke()` 暴露。
  */
 
-import type { StoredProject } from '@miaoma/video-project';
+import type {
+  ApprovalDecision,
+  ApprovalGate,
+  ApprovalInterruptPayload,
+  ArtifactReference,
+  ChatMessage,
+  ChatStreamEvent,
+  CreationInputDraft,
+  RunEvent,
+  StoredProject,
+  VoicePresetId,
+  WorkflowNodeId,
+  WorkflowPhaseStatus,
+  WorkflowRunStatus,
+} from '@miaoma/video-project';
 
 export interface AppInfo {
   name: string;
@@ -36,6 +50,7 @@ export interface MediaInfo {
 export interface ProjectSummary {
   contentRevision: number;
   createdAt: string;
+  isDraft: boolean;
   name: string;
   projectId: string;
   schemaVersion: string;
@@ -45,6 +60,7 @@ export interface ProjectSummary {
 export interface ProjectCreateInput {
   assetPath?: string;
   name: string;
+  creation?: CreationInputDraft;
 }
 
 export interface ProjectUpdateInput {
@@ -74,6 +90,74 @@ export interface LlmChatResult {
   usage?: LlmChatUsage;
 }
 
+/** 渲染进程可见的创作输入；不包含本地素材绝对路径。 */
+export interface PublicCreationInput {
+  createdAt: string;
+  requirementsText?: string;
+  script: string;
+  voicePresetId: VoicePresetId;
+}
+
+export interface WorkflowPublicState {
+  contentRevision: number;
+  currentNodeId: WorkflowNodeId | null;
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+  };
+  lastEventSeq: number;
+  pendingApproval?: ApprovalInterruptPayload;
+  pendingGate?: ApprovalGate;
+  phaseStatus: WorkflowPhaseStatus;
+  runId: string;
+  saved: boolean;
+  status: WorkflowRunStatus;
+}
+
+export interface ChatListResult {
+  creation: PublicCreationInput | null;
+  messages: ChatMessage[];
+  projectName: string;
+  workflow: WorkflowPublicState | null;
+}
+
+export interface ChatActionResult {
+  messages: ChatMessage[];
+  workflow: WorkflowPublicState | null;
+}
+
+export interface ChatSendInput {
+  projectId: string;
+  text: string;
+}
+
+export interface WorkflowResumeInput {
+  decision?: ApprovalDecision;
+  projectId: string;
+  runId: string;
+}
+
+export interface WorkflowCancelInput {
+  projectId: string;
+  runId: string;
+}
+
+export interface WorkflowArtifactInput {
+  projectId: string;
+  reference: ArtifactReference;
+}
+
+export type WorkflowArtifactPayload = Record<string, unknown>;
+
+export interface IpcEventContract {
+  'chat:message': ChatMessage;
+  'chat:stream': ChatStreamEvent;
+  'workflow:event': RunEvent;
+}
+
+export type IpcEventChannel = keyof IpcEventContract;
+
 export type IpcErrorCode =
   | 'IPC_INVALID_ARGUMENT'
   | 'IPC_UNAVAILABLE'
@@ -88,6 +172,8 @@ export type IpcErrorCode =
   | 'PROJECT_WRITE_FAILED'
   | 'PROJECT_DELETE_FAILED'
   | 'PROJECT_LIST_FAILED'
+  | 'PROJECT_CREATION_MISSING'
+  | 'PROJECT_STALE_REVISION'
   | 'ASSET_INVALID_ARGUMENT'
   | 'ASSET_SCAN_FAILED'
   | 'ASSET_PATH_NOT_FOUND'
@@ -98,7 +184,21 @@ export type IpcErrorCode =
   | 'ASSET_MANIFEST_WRITE_FAILED'
   | 'LLM_INVALID_ARGUMENT'
   | 'LLM_NOT_CONFIGURED'
-  | 'LLM_REQUEST_FAILED';
+  | 'LLM_REQUEST_FAILED'
+  | 'WORKFLOW_INVALID_ARGUMENT'
+  | 'WORKFLOW_NOT_FOUND'
+  | 'WORKFLOW_BUSY'
+  | 'WORKFLOW_APPROVAL_REQUIRED'
+  | 'WORKFLOW_STALE_APPROVAL'
+  | 'WORKFLOW_STALE_RESULT'
+  | 'WORKFLOW_CHECKPOINT_INCOMPATIBLE'
+  | 'WORKFLOW_ARTIFACT_INVALID'
+  | 'CHAT_INVALID_ARGUMENT'
+  | 'CHAT_CONTEXT_MISSING'
+  | 'CHAT_APPROVAL_NOT_FOUND'
+  | 'CHAT_LOG_INVALID'
+  | 'CHAT_LOG_TOO_LARGE'
+  | 'CHAT_WRITE_FAILED';
 
 export interface IpcErrorPayload {
   code: IpcErrorCode;
@@ -154,9 +254,45 @@ export interface IpcInvokeContract {
     params: [projectId: string];
     result: ProjectDeleteResult;
   };
+  'project:select-assets': {
+    params: [projectId: string];
+    result: { selected: boolean };
+  };
   'llm:chat': {
     params: [messages: LlmChatMessage[]];
     result: LlmChatResult;
+  };
+  'chat:list': {
+    params: [projectId: string];
+    result: ChatListResult;
+  };
+  'chat:start': {
+    params: [projectId: string];
+    result: ChatActionResult;
+  };
+  'chat:send': {
+    params: [input: ChatSendInput];
+    result: ChatActionResult;
+  };
+  'chat:retry': {
+    params: [projectId: string];
+    result: ChatActionResult;
+  };
+  'workflow:get-state': {
+    params: [projectId: string];
+    result: WorkflowPublicState | null;
+  };
+  'workflow:resume': {
+    params: [input: WorkflowResumeInput];
+    result: WorkflowPublicState;
+  };
+  'workflow:cancel': {
+    params: [input: WorkflowCancelInput];
+    result: WorkflowPublicState;
+  };
+  'workflow:get-artifact': {
+    params: [input: WorkflowArtifactInput];
+    result: WorkflowArtifactPayload;
   };
 }
 
@@ -187,12 +323,31 @@ export const IPC_CHANNELS = {
     delete: 'project:delete' satisfies IpcChannel,
     get: 'project:get' satisfies IpcChannel,
     list: 'project:list' satisfies IpcChannel,
+    selectAssets: 'project:select-assets' satisfies IpcChannel,
     update: 'project:update' satisfies IpcChannel,
   },
   llm: {
     chat: 'llm:chat' satisfies IpcChannel,
   },
+  chat: {
+    list: 'chat:list' satisfies IpcChannel,
+    retry: 'chat:retry' satisfies IpcChannel,
+    send: 'chat:send' satisfies IpcChannel,
+    start: 'chat:start' satisfies IpcChannel,
+  },
+  workflow: {
+    cancel: 'workflow:cancel' satisfies IpcChannel,
+    getArtifact: 'workflow:get-artifact' satisfies IpcChannel,
+    getState: 'workflow:get-state' satisfies IpcChannel,
+    resume: 'workflow:resume' satisfies IpcChannel,
+  },
 } as const satisfies Record<string, Record<string, IpcChannel>>;
+
+export const IPC_EVENT_CHANNELS = {
+  chatMessage: 'chat:message' satisfies IpcEventChannel,
+  chatStream: 'chat:stream' satisfies IpcEventChannel,
+  workflowEvent: 'workflow:event' satisfies IpcEventChannel,
+} as const;
 
 export interface MiaomaProjectApi {
   list(): Promise<IpcResponse<IpcResult<'project:list'>>>;
@@ -200,10 +355,30 @@ export interface MiaomaProjectApi {
   create(input: ProjectCreateInput): Promise<IpcResponse<IpcResult<'project:create'>>>;
   update(input: ProjectUpdateInput): Promise<IpcResponse<IpcResult<'project:update'>>>;
   delete(projectId: string): Promise<IpcResponse<IpcResult<'project:delete'>>>;
+  selectAssets(projectId: string): Promise<IpcResponse<IpcResult<'project:select-assets'>>>;
 }
 
 export interface MiaomaLlmApi {
   chat(messages: LlmChatMessage[]): Promise<IpcResponse<IpcResult<'llm:chat'>>>;
+}
+
+export interface MiaomaChatApi {
+  list(projectId: string): Promise<IpcResponse<IpcResult<'chat:list'>>>;
+  start(projectId: string): Promise<IpcResponse<IpcResult<'chat:start'>>>;
+  send(input: ChatSendInput): Promise<IpcResponse<IpcResult<'chat:send'>>>;
+  retry(projectId: string): Promise<IpcResponse<IpcResult<'chat:retry'>>>;
+  onMessage(listener: (message: ChatMessage) => void): () => void;
+  onStream(listener: (event: ChatStreamEvent) => void): () => void;
+}
+
+export interface MiaomaWorkflowApi {
+  getState(projectId: string): Promise<IpcResponse<IpcResult<'workflow:get-state'>>>;
+  resume(input: WorkflowResumeInput): Promise<IpcResponse<IpcResult<'workflow:resume'>>>;
+  cancel(input: WorkflowCancelInput): Promise<IpcResponse<IpcResult<'workflow:cancel'>>>;
+  getArtifact(
+    input: WorkflowArtifactInput,
+  ): Promise<IpcResponse<IpcResult<'workflow:get-artifact'>>>;
+  onEvent(listener: (event: RunEvent) => void): () => void;
 }
 
 export interface MiaomaApi {
@@ -213,4 +388,6 @@ export interface MiaomaApi {
   getMediaInfo(): Promise<IpcResponse<IpcResult<'media:get-info'>>>;
   project: MiaomaProjectApi;
   llm: MiaomaLlmApi;
+  chat: MiaomaChatApi;
+  workflow: MiaomaWorkflowApi;
 }

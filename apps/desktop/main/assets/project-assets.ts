@@ -5,10 +5,26 @@ import { toMediaErrorSummary } from '@miaoma/video-agent';
 import type { ProjectAssets, VideoAsset } from '@miaoma/video-project';
 import type { AssetSelectionManifest } from './asset-manifest';
 import { ASSET_MANIFEST_VERSION } from './asset-manifest';
-import { scanAssetRoots, type ScanCandidate, type ScanResult } from './asset-scanner';
+import {
+  scanAssetRoots,
+  type ScanCandidate,
+  type ScanProgress,
+  type ScanResult,
+} from './asset-scanner';
 import { IpcError } from '../ipc-error';
 
 export type ProbeVideoFn = (candidate: ScanCandidate) => Promise<VideoProbeResult>;
+
+export interface PrepareProjectAssetsOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: ScanProgress) => void;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    signal.throwIfAborted();
+  }
+}
 
 export interface PreparedProjectAssets {
   assets: ProjectAssets;
@@ -51,6 +67,7 @@ function normalizeAssetPath(input: string): string {
 export async function prepareProjectAssets(
   assetPath: string,
   probe: ProbeVideoFn,
+  options: PrepareProjectAssetsOptions = {},
 ): Promise<PreparedProjectAssets> {
   const normalizedPath = normalizeAssetPath(assetPath);
 
@@ -64,9 +81,18 @@ export async function prepareProjectAssets(
     scanResult = await scanAssetRoots({
       filterMode: 'strict',
       roots: [normalizedPath],
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
     });
   } catch {
+    throwIfAborted(options.signal);
     throw new IpcError('ASSET_SCAN_FAILED', '扫描视频素材失败。', true);
+  }
+
+  if (scanResult.cancelled) {
+    const error = new Error('asset scan cancelled');
+    error.name = 'AbortError';
+    throw error;
   }
 
   const rootIssue = scanResult.issues.find((issue) =>
@@ -107,6 +133,8 @@ export async function prepareProjectAssets(
   const probeErrors = new Map<string, MediaErrorSummary>();
 
   for (const candidate of readyVideos) {
+    throwIfAborted(options.signal);
+
     let result: VideoProbeResult;
 
     try {

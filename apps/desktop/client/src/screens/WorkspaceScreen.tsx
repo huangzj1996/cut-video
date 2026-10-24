@@ -16,6 +16,7 @@ interface ProjectItem {
   coverUrl: string;
   createdAt: string;
   id: string;
+  isDraft?: boolean;
   title: string;
 }
 
@@ -74,9 +75,9 @@ const DEMO_PROJECTS: readonly ProjectItem[] = [
   },
 ];
 
-const GO_EDITOR = () => {
-  window.location.hash = '#/editor';
-};
+function openProject(project: ProjectItem): void {
+  window.location.hash = project.isDraft ? `#/create-chat/${project.id}` : '#/editor';
+}
 
 function coverFor(projectId: string): string {
   let hash = 0;
@@ -93,6 +94,7 @@ function toProjectItem(summary: ProjectSummary): ProjectItem {
     coverUrl: coverFor(summary.projectId),
     createdAt: summary.createdAt.slice(0, 10),
     id: summary.projectId,
+    isDraft: summary.isDraft,
     title: summary.name,
   };
 }
@@ -100,10 +102,11 @@ function toProjectItem(summary: ProjectSummary): ProjectItem {
 interface ProjectCardProps {
   onDelete: (project: ProjectItem) => void;
   onNotify: (message: string) => void;
+  onOpen: (project: ProjectItem) => void;
   project: ProjectItem;
 }
 
-function ProjectCard({ onDelete, onNotify, project }: ProjectCardProps) {
+function ProjectCard({ onDelete, onNotify, onOpen, project }: ProjectCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -145,10 +148,10 @@ function ProjectCard({ onDelete, onNotify, project }: ProjectCardProps) {
       className={`ws-project-card${menuOpen ? ' is-menu-open' : ''}`}
     >
       <button
-        aria-label={`继续编辑：${project.title}`}
+        aria-label={`${project.isDraft ? '继续创作' : '继续编辑'}：${project.title}`}
         className="ws-project-body"
         type="button"
-        onClick={GO_EDITOR}
+        onClick={() => onOpen(project)}
       >
         <span className="ws-project-cover">
           <img alt="" draggable={false} src={project.coverUrl} />
@@ -191,7 +194,7 @@ function ProjectCard({ onDelete, onNotify, project }: ProjectCardProps) {
               type="button"
               onClick={() => {
                 setMenuOpen(false);
-                GO_EDITOR();
+                onOpen(project);
               }}
             >
               打开项目
@@ -436,6 +439,7 @@ export function WorkspaceScreen() {
                 project={project}
                 onDelete={requestDelete}
                 onNotify={notify}
+                onOpen={openProject}
               />
             ))}
           </section>

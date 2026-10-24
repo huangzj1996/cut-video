@@ -380,6 +380,14 @@ function App() {
     return <CreateChatScreen />;
   }
 
+  if (hash.startsWith('#/create-chat/')) {
+    const projectId = hash.slice('#/create-chat/'.length);
+
+    if (/^[A-Za-z0-9_-]{1,128}$/.test(projectId)) {
+      return <CreateChatScreen projectId={projectId} />;
+    }
+  }
+
   if (hash === '#/editor') {
     return <EditorVideoScreen />;
   }

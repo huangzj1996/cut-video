@@ -88,6 +88,16 @@ describe('DeepSeek provider: generate', () => {
     });
   });
 
+  it('passes response_format when JSON mode is requested', async () => {
+    const { mock, provider } = makeProvider(() => jsonResponse(chatCompletion({ content: '{}' })));
+
+    await provider.generate(MESSAGES, { responseFormat: 'json_object' });
+
+    expect(mock.requests[0]?.body).toMatchObject({
+      response_format: { type: 'json_object' },
+    });
+  });
+
   it('maps cached and reasoning tokens', async () => {
     const usage = tokenUsage(12, 8);
     usage.prompt_tokens_details = { cached_tokens: 4 };

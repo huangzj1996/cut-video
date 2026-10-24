@@ -193,6 +193,10 @@ function validateGenerationOptions(options: LlmGenerationOptions): void {
       throw invalidRequest('stop');
     }
   }
+
+  if (options.responseFormat !== undefined && options.responseFormat !== 'json_object') {
+    throw invalidRequest('responseFormat');
+  }
 }
 
 function createCallContext(userSignal: AbortSignal | undefined, timeoutMs: number): CallContext {
@@ -353,8 +357,14 @@ export function createDeepSeekProvider(config: DeepSeekProviderConfig): LlmProvi
     model: string,
     temperature: number | undefined,
     maxOutputTokens: number | undefined,
+    responseFormat: LlmGenerationOptions['responseFormat'],
   ): ChatOpenAI {
-    const cacheKey = JSON.stringify([model, temperature ?? null, maxOutputTokens ?? null]);
+    const cacheKey = JSON.stringify([
+      model,
+      temperature ?? null,
+      maxOutputTokens ?? null,
+      responseFormat ?? null,
+    ]);
     const cached = modelCache.get(cacheKey);
 
     if (cached) {
@@ -367,6 +377,9 @@ export function createDeepSeekProvider(config: DeepSeekProviderConfig): LlmProvi
       model,
       ...(temperature !== undefined ? { temperature } : {}),
       ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
+      ...(responseFormat !== undefined
+        ? { modelKwargs: { response_format: { type: responseFormat } } }
+        : {}),
       configuration: {
         baseURL,
         organization: null,
@@ -394,6 +407,7 @@ export function createDeepSeekProvider(config: DeepSeekProviderConfig): LlmProvi
         model,
         resolveTemperature(options),
         resolveMaxOutputTokens(options),
+        options.responseFormat,
       );
       const call = createCallContext(options.signal, options.timeoutMs ?? defaultTimeoutMs);
 
@@ -451,6 +465,7 @@ export function createDeepSeekProvider(config: DeepSeekProviderConfig): LlmProvi
         model,
         resolveTemperature(options),
         resolveMaxOutputTokens(options),
+        options.responseFormat,
       );
       const call = createCallContext(options.signal, options.timeoutMs ?? defaultTimeoutMs);
 

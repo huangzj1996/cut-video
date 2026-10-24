@@ -17,6 +17,10 @@ export interface KeyframeSourceInput {
 
 export type ExtractKeyframesFn = (source: KeyframeSourceInput) => Promise<KeyframeExtractionResult>;
 
+export interface AttachKeyframesOptions {
+  signal?: AbortSignal;
+}
+
 export interface KeyframeAttachment {
   assets: ProjectAssets;
   /** pathKey → 内容哈希缓存键 */
@@ -37,6 +41,7 @@ export interface KeyframeAttachment {
 export async function attachKeyframes(
   prepared: PreparedProjectAssets,
   extract: ExtractKeyframesFn,
+  options: AttachKeyframesOptions = {},
 ): Promise<KeyframeAttachment> {
   const thumbnails: ThumbnailAsset[] = [];
   const videos: VideoAsset[] = [];
@@ -45,6 +50,10 @@ export async function attachKeyframes(
   const frameCounts = new Map<string, number>();
 
   for (const video of prepared.assets.videos) {
+    if (options.signal?.aborted) {
+      options.signal.throwIfAborted();
+    }
+
     const pathKey = toPathKey(video.path);
     const metadata = prepared.probes.get(pathKey);
     const thumbnailIds: string[] = [];

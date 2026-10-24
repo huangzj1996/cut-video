@@ -10,10 +10,16 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import {
+  CreationInputDraftSchema,
+  CreationInputSchema,
   PROJECT_SCHEMA_VERSION,
   StoredProjectSchema,
+  VideoProjectSchema,
+  type CreationInput,
+  type CreationInputDraft,
   type ProjectAssets,
   type StoredProject,
+  type VideoProject,
 } from '@miaoma/video-project';
 import type {
   ProjectCreateInput,
@@ -49,6 +55,7 @@ function toSummary(project: StoredProject): ProjectSummary {
   return {
     contentRevision: project.project.contentRevision,
     createdAt: project.project.createdAt,
+    isDraft: !('ai' in project),
     name: project.project.name,
     projectId: project.project.projectId,
     schemaVersion: project.schemaVersion,
@@ -154,6 +161,96 @@ export class ProjectStore {
     return this.readProject(this.parseProjectId(rawProjectId));
   }
 
+  /**
+   * 主进程内部使用的工程目录绝对路径；不通过 IPC 返回渲染进程。
+   */
+  getProjectDirectory(rawProjectId: string): string {
+    const projectId = this.parseProjectId(rawProjectId);
+    const directory = this.projectDirectory(projectId);
+
+    if (!existsSync(path.join(directory, PROJECT_DIRECTORY_FILE))) {
+      throw new IpcError('PROJECT_NOT_FOUND', '项目不存在。');
+    }
+
+    return directory;
+  }
+
+  writeCreationInput(rawProjectId: string, draft: CreationInputDraft): CreationInput {
+    const projectId = this.parseProjectId(rawProjectId);
+    this.readProject(projectId);
+    const parsedDraft = CreationInputDraftSchema.safeParse(draft);
+
+    if (!parsedDraft.success) {
+      throw new IpcError('PROJECT_INVALID_ARGUMENT', '创作输入无效。', false, {
+        issues: toProjectIssues(parsedDraft.error),
+      });
+    }
+
+    const input: CreationInput = {
+      ...parsedDraft.data,
+      schemaVersion: '1.0.0',
+      projectId,
+      createdAt: new Date().toISOString(),
+    };
+    const directory = path.join(this.projectDirectory(projectId), 'inputs');
+    const target = path.join(directory, 'creation.json');
+    const temporary = path.join(directory, `.creation.json.${randomUUID()}.tmp`);
+
+    try {
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(temporary, `${JSON.stringify(input, null, 2)}\n`, {
+        encoding: 'utf8',
+        flag: 'wx',
+      });
+      renameSync(temporary, target);
+    } catch {
+      try {
+        rmSync(temporary, { force: true });
+      } catch {
+        // 清理失败不影响主错误。
+      }
+      throw new IpcError('PROJECT_WRITE_FAILED', '保存创作输入失败。', true);
+    }
+
+    return input;
+  }
+
+  readCreationInput(rawProjectId: string): CreationInput {
+    const projectId = this.parseProjectId(rawProjectId);
+    this.readProject(projectId);
+    const filePath = path.join(this.projectDirectory(projectId), 'inputs', 'creation.json');
+
+    let raw: string;
+
+    try {
+      raw = readFileSync(filePath, 'utf8');
+    } catch {
+      throw new IpcError('PROJECT_CREATION_MISSING', '工程缺少创作输入。');
+    }
+
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new IpcError('PROJECT_INVALID', '创作输入不是有效的 JSON。');
+    }
+
+    const result = CreationInputSchema.safeParse(parsed);
+
+    if (!result.success) {
+      throw new IpcError('PROJECT_INVALID', '创作输入结构无效。', false, {
+        issues: toProjectIssues(result.error),
+      });
+    }
+
+    if (result.data.projectId !== projectId) {
+      throw new IpcError('PROJECT_INVALID', '创作输入与工程不匹配。');
+    }
+
+    return result.data;
+  }
+
   create(rawInput: ProjectCreateInput, options: { assets?: ProjectAssets } = {}): StoredProject {
     const name = this.parseProjectName((rawInput as { name?: unknown } | undefined)?.name);
     const now = new Date().toISOString();
@@ -196,6 +293,57 @@ export class ProjectStore {
       project: {
         ...parsed.data.project,
         contentRevision: existing.project.contentRevision + 1,
+        createdAt: existing.project.createdAt,
+        updatedAt: new Date().toISOString(),
+      },
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+    });
+
+    this.writeProject(projectId, updated);
+    return updated;
+  }
+
+  /**
+   * 工作流保存：按目标 revision 原子写入，避免 `update()` 的双增或旧修订覆盖。
+   *
+   * - `expectedRevision` 必须是当前 revision + 1；
+   * - 同一 run 已按该 revision 保存时幂等返回；
+   * - 仍保留 `createdAt`，更新 `updatedAt`。
+   */
+  saveGeneratedProject(
+    rawProjectId: string,
+    rawProject: VideoProject,
+    expectedRevision: number,
+  ): StoredProject {
+    const projectId = this.parseProjectId(rawProjectId);
+    const existing = this.readProject(projectId);
+    const parsed = VideoProjectSchema.safeParse(rawProject);
+
+    if (!parsed.success) {
+      throw new IpcError('PROJECT_INVALID', '生成工程结构无效。', false, {
+        issues: toProjectIssues(parsed.error),
+      });
+    }
+
+    if (parsed.data.project.projectId !== projectId) {
+      throw new IpcError('PROJECT_INVALID_ARGUMENT', '项目 ID 与内容不一致。');
+    }
+
+    if ('ai' in existing && existing.ai.runId === parsed.data.ai.runId) {
+      if (existing.project.contentRevision === expectedRevision) {
+        return existing;
+      }
+    }
+
+    if (existing.project.contentRevision !== expectedRevision - 1) {
+      throw new IpcError('PROJECT_STALE_REVISION', '工程内容已变化，请重新生成。');
+    }
+
+    const updated = VideoProjectSchema.parse({
+      ...parsed.data,
+      project: {
+        ...parsed.data.project,
+        contentRevision: expectedRevision,
         createdAt: existing.project.createdAt,
         updatedAt: new Date().toISOString(),
       },

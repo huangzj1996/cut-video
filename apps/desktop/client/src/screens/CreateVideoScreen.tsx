@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { VoiceClip } from '@miaoma/video-project';
+import { VOICE_PRESETS, type VoicePresetId } from '@miaoma/video-project';
 import brandMarkUrl from '../assets/brand-mark.png';
 import { unwrapIpc } from '../lib/ipc';
 import { EditorIcon } from './editor-icons';
@@ -7,26 +7,11 @@ import './create-video.css';
 
 const MAX_SCRIPT_LENGTH = 10_000;
 
-interface VoicePreset {
-  description: string;
-  id: VoiceClip['voicePreset'];
-  name: string;
-}
-
-const VOICE_PRESETS: readonly VoicePreset[] = [
-  { description: '柔和亲切 · 适合知识口播', id: 'wenrou-xuejie', name: '温婉学姐' },
-  { description: '清晰正式 · 适合资讯解说', id: 'xinwen-bobao', name: '新闻播报' },
-  { description: '低沉可靠 · 适合商业叙事', id: 'chenwen-nansheng', name: '沉稳男声' },
-  { description: '明快有力 · 适合教程种草', id: 'huoli-jiangjie', name: '活力讲解' },
-];
-
 const DEFAULT_VOICE = VOICE_PRESETS[0]!;
 
 export function CreateVideoScreen() {
   const [script, setScript] = useState('');
-  const [selectedVoiceId, setSelectedVoiceId] = useState<VoiceClip['voicePreset']>(
-    DEFAULT_VOICE.id,
-  );
+  const [selectedVoiceId, setSelectedVoiceId] = useState<VoicePresetId>(DEFAULT_VOICE.id);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -91,23 +76,32 @@ export function CreateVideoScreen() {
     setCreating(true);
 
     try {
-      if (window.miaoma?.project) {
-        const name = trimmed.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '未命名创作';
-        unwrapIpc(
-          await window.miaoma.project.create({
-            assetPath: assetPath.trim() || undefined,
-            name,
-          }),
-        );
+      if (!window.miaoma?.project) {
+        notify('Preload 桥接未加载，无法创建项目。');
+        return;
       }
 
-      window.location.hash = '#/create-chat';
+      const name = trimmed.split(/\r?\n/, 1)[0]?.trim().slice(0, 40) || '未命名创作';
+      const normalizedAssetPath = assetPath.trim() || undefined;
+      const project = unwrapIpc(
+        await window.miaoma.project.create({
+          assetPath: normalizedAssetPath,
+          creation: {
+            script: trimmed,
+            voicePresetId: selectedVoiceId,
+            ...(normalizedAssetPath ? { assetPath: normalizedAssetPath } : {}),
+          },
+          name,
+        }),
+      );
+
+      window.location.hash = `#/create-chat/${project.project.projectId}`;
     } catch (error) {
       notify(error instanceof Error ? error.message : '创建项目失败。');
     } finally {
       setCreating(false);
     }
-  }, [assetPath, creating, notify, script]);
+  }, [assetPath, creating, notify, script, selectedVoiceId]);
 
   return (
     <div className="create-screen">

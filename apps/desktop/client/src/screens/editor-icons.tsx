@@ -18,6 +18,7 @@ export type EditorIconName =
   | 'wave'
   | 'minus'
   | 'plus'
+  | 'arrow-left'
   | 'chevron-down'
   | 'chevron-up'
   | 'arrow-down'
@@ -145,6 +146,7 @@ const ICON_NODES: Record<EditorIconName, ReactNode> = {
       <path d="M5 12h14" />
     </>
   ),
+  'arrow-left': <path d="m15 18-6-6 6-6" />,
   'chevron-down': <path d="m6 9 6 6 6-6" />,
   'chevron-up': <path d="m18 15-6-6-6 6" />,
   'arrow-down': (

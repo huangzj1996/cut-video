@@ -1,442 +1,444 @@
-/**
- * 「妙剪创作消息页」frame 的静态 UI 实现。
- * 设计依据：docs/design/miaoma-magicut.pen（frame id K4Avtd）。
- * 当前使用 mock 数据，不接入真实 AI、持久化与文件上传。
- */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { ChatMessage, ChatStreamEvent } from '@miaoma/video-project';
+import type { WorkflowPublicState } from '../../../shared/ipc-contract';
+import { unwrapIpc } from '../lib/ipc';
+import { ChatMessageItem } from './create-chat/ChatMessageItem';
+import {
+  ChatEmpty,
+  ChatErrorBanner,
+  ChatLoading,
+  ChatMissingContext,
+} from './create-chat/ChatStates';
+import { PlanList } from './create-chat/PlanList';
+import { ScriptAnalysisCard } from './create-chat/ScriptAnalysisCard';
+import {
+  canSend,
+  deriveGates,
+  derivePlan,
+  formatMessageTime,
+  isChatMessageVisible,
+  workflowStatusLabel,
+} from './create-chat/view-model';
 import { EditorIcon } from './editor-icons';
 import './create-chat.css';
 
-const TIMESTAMP = '18:26';
-
-const USER_REQUEST =
-  '帮我生成一条 60 秒产品介绍短视频，突出智能视频剪辑、素材自动匹配、口播配音和一键导出。整体节奏清晰，适合在官网和社媒同步发布。';
-
-const USER_TAGS: readonly (readonly string[])[] = [
-  ['视频画面', '智能匹配素材'],
-  ['旁白配音', '清朗青年'],
-];
-
-const SUMMARY_TITLE =
-  '这是一份完整的技术教学口播稿，主题聚焦“前端 AI 进阶学习路线”，包含 4 个时间段的内容：';
-
-const SUMMARY_ITEMS: readonly string[] = [
-  '开场问题引入（0:00-0:25）',
-  '为什么不能直接学 AI（0:25-0:55）',
-  '三个月学习路线详解（0:55-2:45）',
-  '收尾总结（2:45-3:05）',
-];
-
-const SCRIPT_PARAGRAPHS: readonly string[] = [
-  '很多前端同学现在都在焦虑一件事：AI 到底应该怎么学。我先问你，如果现在项目里要做一个 AI 功能，比如智能客服、知识库问答，你第一步会怎么做？',
-  '我猜很多同学第一反应是调大模型接口、写个聊天框。这个思路没错，但它只是最外面那一层。真实项目里，你还得考虑用户权限、业务数据、上下文怎么组织、工具怎么调用、日志怎么记录、效果怎么评测、异常怎么兜底。那些 50K 以上的前端 AI 架构岗，要的不是只会调接口的人，而是能讲清楚全链路落地逻辑的人。',
-  '那具体怎么学？我给你一条三个月的进阶路线。第一个月，死磕前端基本盘；第二个月，补全服务端链路；第三个月，进入 AI Agent 工程化。每个阶段都要用真实项目证据来证明能力，而不是只背概念。你当前的学习瓶颈是什么？评论区聊聊。记得点赞关注，我们下期拆解每个阶段的具体落地细节。',
-];
-
-const SPEC_ROWS: readonly (readonly [string, string])[] = [
-  ['视频类型', '抖音/视频号竖屏成片，品牌种草与转化型短视频，适配 15-30 秒主版本'],
-  ['推荐方案', 'AIDA 结构：痛点开场、产品亮点、使用场景、信任背书、明确行动号召'],
-  ['视频风格', '暗色即时通信卡片风格，消息气泡、文件预览、进度轨道与轻量数据标签组合'],
-  ['配色', 'Carbon Frost 暗底：#0D1015/#151B22，蓝色高亮 #4A9FD8，白灰文本分层'],
-  ['字体', 'Inter 承载标题与正文；Geist Mono 用于规格、时长、版本号等数据型信息'],
-  ['口播音色', '清晰专业的年轻中性音色，中速偏稳，结尾 CTA 轻微提速增强行动感'],
-  ['字幕样式', '双行以内白字字幕，关键词蓝色描边或底托，底部安全区内显示并避开控件'],
-  ['素材策略', '产品实拍为主，补充界面录屏、聊天截图、客户证言与轻量动效过渡'],
-  ['节奏', '0-3 秒强钩子，4-15 秒密集卖点，16-24 秒场景证明，末尾 3 秒收束 CTA'],
-  ['交付规格', '1080x1920 MP4/H.264，24/30fps，含无字幕版、带字幕版、封面与工程源文件'],
-];
-
-type PlanTone = 'done' | 'active' | 'pending';
-
-interface PlanStep {
-  id: string;
-  title: string;
-  detail: string;
-  status: string;
-  tone: PlanTone;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '操作失败，请稍后重试。';
 }
 
-const PLAN_STEPS: readonly PlanStep[] = [
-  {
-    id: '01',
-    title: '准备阶段',
-    detail: '加载制片规范与文稿',
-    status: '已完成',
-    tone: 'done',
-  },
-  {
-    id: '02',
-    title: '创建分镜',
-    detail: '生成 6 个镜头，每段绑定字幕与素材意图',
-    status: '已完成',
-    tone: 'done',
-  },
-  {
-    id: '03',
-    title: '配音生成',
-    detail: '合成清朗青年旁白',
-    status: '进行中',
-    tone: 'active',
-  },
-  {
-    id: '04',
-    title: '视频生成',
-    detail: '输出预览并进入编辑',
-    status: '待确认',
-    tone: 'pending',
-  },
-];
-
-type MetricTone = 'blue' | 'purple' | 'teal' | 'amber';
-
-interface OverviewMetric {
-  label: string;
-  value: string;
-  tone: MetricTone;
-}
-
-const OVERVIEW_METRICS: readonly OverviewMetric[] = [
-  { label: '成片时长', value: '约 3 分 05 秒', tone: 'blue' },
-  { label: '视频风格', value: '科技蓝紫 MG 动画', tone: 'purple' },
-  { label: '口播音色', value: '清朗青年', tone: 'teal' },
-  { label: '导出状态', value: '预览已生成', tone: 'amber' },
-];
-
-function BackArrowIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height={18}
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.8}
-      viewBox="0 0 24 24"
-      width={18}
-    >
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  );
-}
-
-function SendPlaneIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height={20}
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.7}
-      viewBox="0 0 24 24"
-      width={20}
-    >
-      <path d="M21 3 3 10.5l7.2 3.3L21 3Z" />
-      <path d="m21 3-7.8 17.2-3-6.4" />
-    </svg>
-  );
-}
-
-function PlanList({ variant }: { variant: 'flow' | 'aside' }) {
-  return (
-    <ul className={`cc-plan cc-plan--${variant}`}>
-      {PLAN_STEPS.map((step) => (
-        <li className="cc-plan-row" key={step.id}>
-          <span aria-hidden="true" className={`cc-plan-dot cc-plan-dot--${step.tone}`} />
-          <span className="cc-plan-copy">
-            <span className="cc-plan-title">
-              {step.id} {step.title}
-            </span>
-            <span className="cc-plan-detail">{step.detail}</span>
-          </span>
-          <span className={`cc-plan-status cc-plan-status--${step.tone}`}>{step.status}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export function CreateChatScreen() {
-  const [requestOpen, setRequestOpen] = useState(true);
-  const [planConfirmed, setPlanConfirmed] = useState(false);
-  const [specConfirmed, setSpecConfirmed] = useState(false);
+export function CreateChatScreen({ projectId }: { projectId?: string } = {}) {
+  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [projectName, setProjectName] = useState('');
+  const [workflow, setWorkflow] = useState<WorkflowPublicState | null>(null);
+  const [stream, setStream] = useState<ChatStreamEvent | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [sentMessages, setSentMessages] = useState<readonly string[]>([]);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [starting, setStarting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const noticeTimer = useRef<number | null>(null);
+  const stickToBottomRef = useRef(true);
+  const mountedRef = useRef(true);
+  const refreshTimer = useRef<number | null>(null);
+  const toastTimer = useRef<number | null>(null);
 
-  const notify = useCallback((message: string) => {
-    setNotice(message);
-
-    if (noticeTimer.current !== null) {
-      window.clearTimeout(noticeTimer.current);
+  const refresh = useCallback(async () => {
+    if (!projectId || !window.miaoma?.chat) {
+      return;
     }
 
-    noticeTimer.current = window.setTimeout(() => {
-      setNotice(null);
-      noticeTimer.current = null;
-    }, 2200);
+    try {
+      const result = unwrapIpc(await window.miaoma.chat.list(projectId));
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setMessages(result.messages);
+      setProjectName(result.projectName);
+      setWorkflow(result.workflow);
+      setError(null);
+    } catch (cause) {
+      if (mountedRef.current) {
+        setError(errorMessage(cause));
+      }
+    }
+  }, [projectId]);
+
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current !== null) {
+      window.clearTimeout(refreshTimer.current);
+    }
+
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      void refresh();
+    }, 140);
+  }, [refresh]);
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current);
+    }
+
+    toastTimer.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimer.current = null;
+    }, 2_800);
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
+
+    if (!projectId) {
+      setLoading(false);
+      return;
+    }
+
+    if (!window.miaoma?.chat || !window.miaoma?.workflow) {
+      setError('Preload 桥接未加载，无法加载创作消息。');
+      setLoading(false);
+      return;
+    }
+
+    const offMessage = window.miaoma.chat.onMessage((message) => {
+      if (message.projectId !== projectId || !mountedRef.current) {
+        return;
+      }
+
+      setMessages((previous) =>
+        previous.some((entry) => entry.id === message.id) ? previous : [...previous, message],
+      );
+
+      // A1 审批卡落库后，用最终产物替代流式草稿。
+      if (message.type === 'approval_request' && message.payload.gate === 'A1') {
+        setStream((current) => (current && current.runId === message.runId ? null : current));
+      }
+    });
+    const offStream = window.miaoma.chat.onStream((event) => {
+      if (event.projectId !== projectId || !mountedRef.current) {
+        return;
+      }
+
+      setStream(event);
+    });
+    const offEvent = window.miaoma.workflow.onEvent((event) => {
+      if (event.projectId !== projectId) {
+        return;
+      }
+
+      if (event.type === 'run.failed' || event.type === 'run.cancelled') {
+        setStream((current) => (current && current.runId === event.runId ? null : current));
+      }
+
+      scheduleRefresh();
+    });
+
+    void (async () => {
+      try {
+        const result = unwrapIpc(await window.miaoma.chat.list(projectId));
+
+        if (!mountedRef.current) {
+          return;
+        }
+
+        setMessages(result.messages);
+        setProjectName(result.projectName);
+        setWorkflow(result.workflow);
+        setLoading(false);
+
+        const hasAssistantReply = result.messages.some((message) => message.role === 'assistant');
+
+        if (result.creation && !result.workflow && !hasAssistantReply) {
+          setStarting(true);
+          setStream(null);
+
+          try {
+            const started = unwrapIpc(await window.miaoma.chat.start(projectId));
+
+            if (mountedRef.current) {
+              setMessages(started.messages);
+              setWorkflow(started.workflow);
+            }
+          } catch (cause) {
+            if (mountedRef.current) {
+              setError(errorMessage(cause));
+            }
+          } finally {
+            if (mountedRef.current) {
+              setStarting(false);
+            }
+          }
+        }
+      } catch (cause) {
+        if (mountedRef.current) {
+          setError(errorMessage(cause));
+          setLoading(false);
+        }
+      }
+    })();
+
     return () => {
-      if (noticeTimer.current !== null) {
-        window.clearTimeout(noticeTimer.current);
+      mountedRef.current = false;
+      offMessage();
+      offStream();
+      offEvent();
+
+      if (refreshTimer.current !== null) {
+        window.clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+
+      if (toastTimer.current !== null) {
+        window.clearTimeout(toastTimer.current);
+        toastTimer.current = null;
       }
     };
+  }, [projectId, scheduleRefresh]);
+
+  const handleScroll = useCallback(() => {
+    const node = scrollRef.current;
+
+    if (!node) {
+      return;
+    }
+
+    stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
   }, []);
 
   useEffect(() => {
-    if (sentMessages.length === 0) {
+    const node = scrollRef.current;
+    const content = node?.firstElementChild;
+
+    if (!node || !content) {
       return;
     }
 
-    const node = scrollRef.current;
+    // 卡片数据、流式内容和图片会异步撑高聊天区；只要用户仍在底部，
+    // 就继续吸底，避免打开已完成工程时停在半路。
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) {
+        node.scrollTop = node.scrollHeight;
+      }
+    });
 
-    if (node) {
-      node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
-    }
-  }, [sentMessages]);
+    observer.observe(content);
 
-  const handleSend = useCallback(() => {
+    return () => observer.disconnect();
+  }, []);
+
+  const handleSend = useCallback(async () => {
     const text = draft.trim();
 
-    if (!text) {
+    if (!projectId || !text || sending || !canSend(workflow) || !window.miaoma?.chat) {
       return;
     }
 
-    setSentMessages((previous) => [...previous, text]);
-    setDraft('');
-  }, [draft]);
+    setSending(true);
+    setError(null);
 
-  const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    try {
+      const result = unwrapIpc(await window.miaoma.chat.send({ projectId, text }));
+
+      if (mountedRef.current) {
+        setMessages(result.messages);
+        setWorkflow(result.workflow);
+        setDraft('');
+      }
+    } catch (cause) {
+      if (mountedRef.current) {
+        setError(errorMessage(cause));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSending(false);
+      }
+    }
+  }, [draft, projectId, sending, workflow]);
+
+  const handleAttach = useCallback(async () => {
+    if (!projectId || !window.miaoma?.project) {
+      return;
+    }
+
+    try {
+      const result = unwrapIpc(await window.miaoma.project.selectAssets(projectId));
+
+      if (result.selected) {
+        showToast(
+          workflow?.status === 'succeeded'
+            ? '素材目录已更新；发送修改意见后将使用新素材重新生成。'
+            : '素材目录已更新，将在下一轮生成时生效。',
+        );
+      }
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  }, [projectId, showToast, workflow?.status]);
+
+  const handleRetry = useCallback(async () => {
+    if (!projectId || !window.miaoma?.chat) {
+      return;
+    }
+
+    setError(null);
+    setStream(null);
+
+    try {
+      const result = unwrapIpc(await window.miaoma.chat.retry(projectId));
+
+      if (mountedRef.current) {
+        setMessages(result.messages);
+        setWorkflow(result.workflow);
+      }
+    } catch (cause) {
+      if (mountedRef.current) {
+        setError(errorMessage(cause));
+      }
+    }
+  }, [projectId]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) {
       return;
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
 
-  const handleConfirmPlan = () => {
-    if (planConfirmed) {
-      return;
-    }
-
-    setPlanConfirmed(true);
-    notify('方案已确认（演示）');
+  const handleBack = () => {
+    window.location.hash = projectId ? '#/workspace' : '#/create';
   };
 
-  const handleConfirmSpec = () => {
-    if (specConfirmed) {
-      return;
-    }
+  if (!projectId) {
+    return (
+      <div className="create-chat-screen">
+        <ChatMissingContext onBack={handleBack} />
+      </div>
+    );
+  }
 
-    setSpecConfirmed(true);
-    notify('成片需求已确认（演示）');
-  };
+  const plan = derivePlan(messages, workflow);
+  const gates = deriveGates(messages);
+  const waiting = workflow?.status === 'waiting_user';
+  const running = workflow?.status === 'running' || starting;
+  const canCompose = waiting || workflow?.status === 'succeeded';
+  const editable = canCompose && !sending;
+  const visibleMessages = messages.filter(isChatMessageVisible);
+  // 同一 run 里可能有上一版 A1（用户要求修改后重生成）；只有晚于本次流式
+  // 开始的 A1 才代表当前这版简报已经落库。
+  const hasA1ForStream = stream
+    ? messages.some(
+        (message) =>
+          message.type === 'approval_request' &&
+          message.payload.gate === 'A1' &&
+          message.runId === stream.runId &&
+          message.createdAt >= stream.timestamp,
+      )
+    : false;
+  const showStream =
+    stream !== null &&
+    !hasA1ForStream &&
+    workflow?.runId === stream.runId &&
+    (workflow.status === 'running' || workflow.status === 'waiting_user');
+
+  const placeholder = waiting
+    ? '回复「确认」继续，或直接说明要修改的内容'
+    : running
+      ? '智能体正在执行…'
+      : workflow?.status === 'succeeded'
+        ? '继续补充创作要求，或要求智能体修改分镜'
+        : workflow?.status === 'failed'
+          ? '运行失败，请点击重试'
+          : '等待智能体启动…';
+
+  const hint = waiting
+    ? '回复「确认」继续；任何其他文字都会作为修改意见'
+    : running
+      ? '执行过程会持续更新，可以先离开页面'
+      : workflow?.status === 'succeeded'
+        ? '例如：缩短到 90 秒、加重技术感、换成沉稳男声'
+        : workflow?.status === 'failed'
+          ? '点击错误卡上的重试，或返回工作台'
+          : '正在读取创作上下文';
 
   return (
     <div className="create-chat-screen">
-      <button
-        aria-label="返回创作页"
-        className="cc-back"
-        type="button"
-        onClick={() => {
-          window.location.hash = '#/create';
-        }}
-      >
-        <BackArrowIcon />
+      <button aria-label="返回工作台" className="cc-back" type="button" onClick={handleBack}>
+        <EditorIcon name="arrow-left" size={18} />
       </button>
 
+      {toast ? (
+        <div className="cc-toast" role="status">
+          {toast}
+        </div>
+      ) : null}
+
       <aside aria-label="创作执行要点" className="cc-aside">
-        <PlanList variant="aside" />
+        <PlanList steps={plan} />
       </aside>
 
-      <main className="cc-scroll" ref={scrollRef}>
+      <main className="cc-scroll" ref={scrollRef} onScroll={handleScroll}>
         <div className="cc-stage">
           <div className="cc-column">
-            <p className="cc-time">{TIMESTAMP}</p>
+            <div className="cc-project-bar">
+              <span className="cc-project-name">{projectName || '未命名创作'}</span>
+              <span className={`cc-run-status cc-run-status--${workflow?.status ?? 'pending'}`}>
+                {workflowStatusLabel(workflow?.status)}
+              </span>
+            </div>
+
+            <p className="cc-time">{messages[0] ? formatMessageTime(messages[0].createdAt) : ''}</p>
+
+            <div className="cc-plan-inline">
+              <PlanList steps={plan} variant="inline" />
+            </div>
+
+            {error ? (
+              <ChatErrorBanner
+                message={error}
+                onRetry={workflow?.status === 'failed' ? () => void handleRetry() : undefined}
+              />
+            ) : null}
+
+            {loading ? <ChatLoading /> : null}
+
+            {!loading && messages.length === 0 && !starting ? <ChatEmpty /> : null}
 
             <div className="cc-flow">
-              <article className={`cc-request${requestOpen ? ' cc-request--expanded' : ''}`}>
-                <div className="cc-request-head">
-                  <span aria-hidden="true" className="cc-avatar" />
-                  <span className="cc-request-name">你</span>
-                  <button
-                    aria-expanded={requestOpen}
-                    aria-label={requestOpen ? '收起创作需求' : '展开创作需求'}
-                    className="cc-request-toggle"
-                    type="button"
-                    onClick={() => setRequestOpen((open) => !open)}
-                  >
-                    <EditorIcon name="chevron-down" size={17} />
-                  </button>
-                </div>
-
-                {requestOpen ? (
-                  <>
-                    <p className="cc-request-text">{USER_REQUEST}</p>
-                    <div className="cc-request-tags">
-                      {USER_TAGS.map((tags) => (
-                        <div className="cc-tag-row" key={tags.join('-')}>
-                          {tags.map((tag) => (
-                            <span className="cc-tag" key={tag}>
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-              </article>
-
-              <div className="cc-prose">
-                <p>
-                  我来分析你的文稿，这是一份关于“前端 AI
-                  进阶学习路线”的教学内容，时间线清晰、结构完整。让我先加载制片技能来完成方案设计。
-                </p>
-                <p>我已经加载了制片技能。现在分析你的文稿：</p>
-              </div>
-
-              <section className="cc-summary-card">
-                <h2 className="cc-card-title">{SUMMARY_TITLE}</h2>
-                <ul className="cc-summary-list">
-                  {SUMMARY_ITEMS.map((item) => (
-                    <li className="cc-summary-item" key={item}>
-                      <span aria-hidden="true" className="cc-summary-dot" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
-              <p className="cc-prose">
-                {'文稿已经包含时间轴和画面描述，属于'}
-                <span className="cc-type-highlight">类型 3</span>
-                {
-                  '：有实质内容但不是纯口播文稿，需要先转化为纯口播文稿。同时，内容涉及大量技术概念、学习路径、时间规划，非常适合用 MG 动画来可视化呈现。'
-                }
-              </p>
-
-              <section className="cc-doc-card">
-                <h2 className="cc-script-title">转化后的纯口播文稿</h2>
-                <div className="cc-script">
-                  {SCRIPT_PARAGRAPHS.map((paragraph) => (
-                    <p key={paragraph.slice(0, 18)}>{paragraph}</p>
-                  ))}
-                </div>
-              </section>
-
-              <p className="cc-prose">
-                文稿已转化为纯口播形式。现在为你推荐制作方案：素材混合 MG
-                动画。该方案既能保留技术教学的专业感，又能用动态图表和流程示意降低理解成本。
-              </p>
-
-              <div className="cc-actions">
-                <button
-                  className="cc-confirm cc-confirm--wide"
-                  disabled={planConfirmed}
-                  type="button"
-                  onClick={handleConfirmPlan}
-                >
-                  {planConfirmed ? '已确认' : '确认并继续'}
-                </button>
-              </div>
-
-              <div className="cc-prose">
-                <p>
-                  好的，你选择素材混合 MG 动画方案。现在我来读取 MG
-                  动画方案的详细规范，为你形成完整的成片需求。
-                </p>
-                <p>
-                  现在我来为你生成完整的成片需求文档。根据你的内容特点，我选择科技蓝紫配色方案，配合阿里妈妈数黑体字体，打造专业前沿的技术教学风格。
-                </p>
-              </div>
-
-              <section className="cc-doc-card">
-                <h2 className="cc-spec-title">成片需求文档</h2>
-                <table className="cc-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">字段</th>
-                      <th scope="col">完整需求说明</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {SPEC_ROWS.map(([field, detail]) => (
-                      <tr key={field}>
-                        <td>{field}</td>
-                        <td>{detail}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-
-              <div className="cc-actions">
-                <button
-                  className="cc-confirm"
-                  disabled={specConfirmed}
-                  type="button"
-                  onClick={handleConfirmSpec}
-                >
-                  {specConfirmed ? '已确认' : '确认'}
-                </button>
-              </div>
-
-              <div className="cc-agent">
-                <p className="cc-prose">
-                  我已收到创作需求。接下来会按即时协作流程推进：先拆解目标受众与叙事节奏，再生成分镜规划、匹配素材、选择口播音色，最后进入编辑器等待你确认细节。
-                </p>
-                <PlanList variant="flow" />
-              </div>
-
-              <section className="cc-overview">
-                <h2 className="cc-overview-title">视频概览</h2>
-                <p className="cc-overview-desc">
-                  整个制作流程已完成。智能体已经完成文稿确认、成片需求、分镜规划、配音生成和视频生成，下面是当前视频概览。
-                </p>
-
-                <div className="cc-metrics">
-                  {OVERVIEW_METRICS.map((metric) => (
-                    <div className="cc-metric" key={metric.label}>
-                      <span className="cc-metric-label">{metric.label}</span>
-                      <span className={`cc-metric-value cc-metric-value--${metric.tone}`}>
-                        {metric.value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  className="cc-complete"
-                  type="button"
-                  onClick={() => {
+              {visibleMessages.map((message) => (
+                <ChatMessageItem
+                  gate={gates.get(message.id)}
+                  key={message.id}
+                  message={message}
+                  onOpenEditor={() => {
                     window.location.hash = '#/editor';
                   }}
-                >
-                  <EditorIcon name="check" size={17} />
-                  <span>视频制作完成，可进入编辑器预览并微调轨道。</span>
-                </button>
-              </section>
-
-              {sentMessages.map((message, index) => (
-                <article className="cc-request cc-sent" key={`${index}-${message}`}>
-                  <div className="cc-request-head">
-                    <span aria-hidden="true" className="cc-avatar" />
-                    <span className="cc-request-name">你</span>
-                  </div>
-                  <p className="cc-request-text cc-sent-text">{message}</p>
-                </article>
+                  onRetry={() => void handleRetry()}
+                  projectId={projectId}
+                />
               ))}
+
+              {showStream && stream ? (
+                <article className="cc-analysis-live">
+                  <div className="cc-analysis-live-head">
+                    <span
+                      aria-hidden="true"
+                      className={`cc-live-dot${stream.done ? ' cc-live-dot--done' : ''}`}
+                    />
+                    <span>{stream.done ? '文稿分析完成，正在准备确认…' : '正在分析文稿…'}</span>
+                  </div>
+                  <ScriptAnalysisCard analysis={stream.draft} />
+                </article>
+              ) : null}
+
+              {starting ? <p className="cc-prose">正在启动创作流程…</p> : null}
             </div>
           </div>
         </div>
@@ -444,47 +446,44 @@ export function CreateChatScreen() {
 
       <div className="cc-dock">
         <div className="cc-column">
-          <div className="cc-composer">
+          <div className={`cc-composer${editable ? '' : ' cc-composer--disabled'}`}>
             <button
-              aria-label="上传附件"
+              aria-label="添加视频素材"
               className="cc-attach"
+              disabled={running}
+              title={running ? '工作流执行中，暂不能更换素材' : '选择视频素材目录'}
               type="button"
-              onClick={() => notify('附件上传将在后续版本开放')}
+              onClick={() => void handleAttach()}
             >
               <EditorIcon name="plus" size={20} />
             </button>
 
             <div className="cc-composer-main">
               <textarea
-                aria-label="继续补充创作要求"
+                aria-label="审批回复或修改意见"
                 className="cc-composer-input"
-                placeholder="继续补充创作要求，或要求智能体修改分镜"
+                disabled={!editable}
+                placeholder={placeholder}
                 rows={1}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={handleComposerKeyDown}
+                onKeyDown={handleKeyDown}
               />
-              <span className="cc-composer-hint">例如：缩短到 90 秒、加重技术感、换成沉稳男声</span>
+              <span className="cc-composer-hint">{hint}</span>
             </div>
 
             <button
               aria-label="发送消息"
               className="cc-send"
-              disabled={draft.trim().length === 0}
+              disabled={!editable || draft.trim().length === 0}
               type="button"
-              onClick={handleSend}
+              onClick={() => void handleSend()}
             >
-              <SendPlaneIcon />
+              <EditorIcon name="send" size={20} />
             </button>
           </div>
         </div>
       </div>
-
-      {notice ? (
-        <div className="cc-toast" role="status">
-          {notice}
-        </div>
-      ) : null}
     </div>
   );
 }

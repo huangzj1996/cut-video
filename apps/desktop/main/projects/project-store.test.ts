@@ -6,6 +6,7 @@ import {
   PROJECT_SCHEMA_VERSION,
   type ProjectAssets,
   type StoredProject,
+  type VideoProject,
 } from '@miaoma/video-project';
 import { IpcError } from '../ipc-error';
 import { ProjectStore } from './project-store';
@@ -36,6 +37,26 @@ function expectIpcError(callback: () => unknown, code: string): void {
 
 function projectFile(projectId: string): string {
   return path.join(root, projectId, 'project.json');
+}
+
+function asVideoProject(project: StoredProject, runId = 'run-1'): VideoProject {
+  return {
+    ai: {
+      inputFingerprint: 'fingerprint',
+      model: 'deepseek-chat',
+      modelConfigVersion: 'v1',
+      provider: 'deepseek',
+      runId,
+      startedAt: '2026-10-24T00:00:00.000Z',
+    },
+    assets: project.assets,
+    canvas: project.canvas,
+    project: project.project,
+    render: project.render,
+    scenes: project.scenes,
+    schemaVersion: project.schemaVersion,
+    tracks: project.tracks,
+  };
 }
 
 describe('ProjectStore', () => {
@@ -110,6 +131,57 @@ describe('ProjectStore', () => {
     expect(readdirSync(path.dirname(projectFile(created.project.projectId)))).toEqual([
       'project.json',
     ]);
+  });
+
+  it('writes and reads creation input', () => {
+    const created = store.create({ name: '创作项目' });
+
+    const input = store.writeCreationInput(created.project.projectId, {
+      script: '  一段口播文稿。  ',
+      voicePresetId: 'wenrou-xuejie',
+    });
+
+    expect(input.script).toBe('一段口播文稿。');
+    expect(input.projectId).toBe(created.project.projectId);
+    expect(store.readCreationInput(created.project.projectId)).toEqual(input);
+    expect(existsSync(path.join(root, created.project.projectId, 'inputs', 'creation.json'))).toBe(
+      true,
+    );
+  });
+
+  it('exposes the project directory internally', () => {
+    const created = store.create({ name: '目录项目' });
+
+    expect(store.getProjectDirectory(created.project.projectId)).toBe(
+      path.join(root, created.project.projectId),
+    );
+    expectIpcError(() => store.getProjectDirectory('missing-project'), 'PROJECT_NOT_FOUND');
+  });
+
+  it('saves a generated project at the expected revision and is idempotent', () => {
+    const created = store.create({ name: '生成项目' });
+    const project = asVideoProject(store.get(created.project.projectId));
+
+    const saved = store.saveGeneratedProject(created.project.projectId, project, 1);
+
+    expect('ai' in saved).toBe(true);
+    expect(saved.project.contentRevision).toBe(1);
+    expect(saved.project.createdAt).toBe(created.project.createdAt);
+    expect(store.list()[0]?.isDraft).toBe(false);
+
+    const repeated = store.saveGeneratedProject(created.project.projectId, project, 1);
+    expect(repeated.project.contentRevision).toBe(1);
+
+    expectIpcError(
+      () => store.saveGeneratedProject(created.project.projectId, project, 3),
+      'PROJECT_STALE_REVISION',
+    );
+  });
+
+  it('marks drafts in project summaries', () => {
+    store.create({ name: '草稿项目' });
+
+    expect(store.list()[0]?.isDraft).toBe(true);
   });
 
   it('creates a project with initial assets', () => {

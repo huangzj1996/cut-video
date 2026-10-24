@@ -22,6 +22,11 @@ export interface LlmGenerationOptions {
   readonly stop?: readonly string[];
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  /**
+   * 请求 provider 返回 JSON 对象（OpenAI 兼容的 response_format）。
+   * 不支持时调用方负责降级为仅提示词约束。
+   */
+  readonly responseFormat?: 'json_object';
 }
 
 export interface LlmGenerationResult {

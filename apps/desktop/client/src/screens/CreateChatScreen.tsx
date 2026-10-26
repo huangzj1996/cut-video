@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import type { ChatMessage, ChatStreamEvent } from '@miaoma/video-project';
 import type { WorkflowPublicState } from '../../../shared/ipc-contract';
 import { unwrapIpc } from '../lib/ipc';
+import { editorHash, WORKSPACE_HASH } from '../lib/routes';
 import { ChatMessageItem } from './create-chat/ChatMessageItem';
 import {
   ChatEmpty,
@@ -313,7 +314,7 @@ export function CreateChatScreen({ projectId }: { projectId?: string } = {}) {
   };
 
   const handleBack = () => {
-    window.location.hash = projectId ? '#/workspace' : '#/create';
+    window.location.hash = projectId ? WORKSPACE_HASH : '#/create';
   };
 
   if (!projectId) {
@@ -418,7 +419,7 @@ export function CreateChatScreen({ projectId }: { projectId?: string } = {}) {
                   key={message.id}
                   message={message}
                   onOpenEditor={() => {
-                    window.location.hash = '#/editor';
+                    window.location.hash = editorHash(projectId);
                   }}
                   onRetry={() => void handleRetry()}
                   projectId={projectId}

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AppInfo, AppSettings, MediaInfo } from '../../shared/ipc-contract';
 import { IpcClientError, unwrapIpc } from './lib/ipc';
+import { isValidProjectId, parseEditorRoute, WORKSPACE_HASH } from './lib/routes';
 import { CreateChatScreen } from './screens/CreateChatScreen';
+import { EditorUnavailable } from './screens/editor-video/EditorStates';
 import { EditorVideoScreen } from './screens/EditorVideoScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { LlmTestScreen } from './screens/LlmTestScreen';
@@ -146,15 +148,6 @@ function StatusScreen() {
               }}
             >
               创作页
-            </button>
-            <button
-              className="button button-ghost"
-              type="button"
-              onClick={() => {
-                window.location.hash = '#/editor';
-              }}
-            >
-              编辑器画面
             </button>
             <button className="button button-ghost" type="button" onClick={() => void handlePing()}>
               测试 IPC
@@ -366,12 +359,21 @@ function useHashRoute(): string {
 
 function App() {
   const hash = useHashRoute();
+  const editorRoute = parseEditorRoute(hash);
+
+  if (editorRoute.kind === 'editor') {
+    return <EditorVideoScreen key={editorRoute.projectId} projectId={editorRoute.projectId} />;
+  }
+
+  if (editorRoute.kind === 'invalid') {
+    return <EditorUnavailable message="工程地址无效，请从工作台重新打开工程。" />;
+  }
 
   if (hash === '#/status') {
     return <StatusScreen />;
   }
 
-  if (hash === '#/workspace') {
+  if (hash === WORKSPACE_HASH) {
     return <HomeScreen activeTab="projects" />;
   }
 
@@ -386,13 +388,9 @@ function App() {
   if (hash.startsWith('#/create-chat/')) {
     const projectId = hash.slice('#/create-chat/'.length);
 
-    if (/^[A-Za-z0-9_-]{1,128}$/.test(projectId)) {
+    if (isValidProjectId(projectId)) {
       return <CreateChatScreen projectId={projectId} />;
     }
-  }
-
-  if (hash === '#/editor') {
-    return <EditorVideoScreen />;
   }
 
   if (hash === '#/llm-test') {

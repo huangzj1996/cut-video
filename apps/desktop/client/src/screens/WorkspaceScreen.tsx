@@ -8,6 +8,7 @@ import projectGameTrailerUrl from '../assets/workspace/project-game-trailer.jpg'
 import projectLivestreamUrl from '../assets/workspace/project-livestream.jpg';
 import projectSaasLaunchUrl from '../assets/workspace/project-saas-launch.jpg';
 import { unwrapIpc } from '../lib/ipc';
+import { projectOpenHash } from '../lib/routes';
 import './workspace.css';
 
 interface ProjectItem {
@@ -74,7 +75,7 @@ const DEMO_PROJECTS: readonly ProjectItem[] = [
 ];
 
 function openProject(project: ProjectItem): void {
-  window.location.hash = project.isDraft ? `#/create-chat/${project.id}` : '#/editor';
+  window.location.hash = projectOpenHash(project.id, project.isDraft === true);
 }
 
 function coverFor(projectId: string): string {

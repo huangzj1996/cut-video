@@ -1,7 +1,6 @@
 /**
- * 「妙剪智能视频编辑器-画面」frame 的静态 UI 实现。
- * 设计依据：docs/design/miaoma-magicut.pen。
- * 当前使用 mock 数据，不含真实预览、时间线编辑、工作流与导出。
+ * 项目级编辑器。左侧分镜、工程名与时长来自最新 `project.json`；
+ * 预览和四轨时间线仍是静态占位，由后续切片接入真实媒体与编辑。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
@@ -9,6 +8,13 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
+import { createChatHash } from '../lib/routes';
+import { EditorEmpty, EditorLoading, EditorUnavailable } from './editor-video/EditorStates';
+import {
+  loadEditorProject,
+  type EditorLoadResult,
+  type EditorProjectView,
+} from './editor-video/project-view';
 import { PreviewStage } from './editor-video/PreviewStage';
 import {
   clampTime,
@@ -26,64 +32,6 @@ import './editor-video.css';
 const TOTAL_SECONDS = 87;
 const TIMELINE_SPAN_SECONDS = 114.8;
 const TICK_STEP_PERCENT = 8.716;
-
-interface StoryboardClip {
-  id: string;
-  name: string;
-  range: string;
-  text: string;
-}
-
-const STORYBOARDS: readonly StoryboardClip[] = [
-  {
-    id: 'scene-01',
-    name: '分镜 01',
-    range: '00:00-00:04',
-    text: '开场把原始素材拖入时间线，\n系统开始识别画面节奏。',
-  },
-  {
-    id: 'scene-02',
-    name: '分镜 02',
-    range: '00:04-00:08',
-    text: 'AI 自动挑选高光片段，\n同步生成第一版字幕。',
-  },
-  {
-    id: 'scene-03',
-    name: '分镜 03',
-    range: '00:00-00:04',
-    text: '是的发送到asdfasdfasdf\n阿斯顿发送到发的阿',
-  },
-  {
-    id: 'scene-04',
-    name: '分镜 04',
-    range: '00:00-00:04',
-    text: '是的发送到\n官方去潍坊过去问\n是的发送到发的岗位工区',
-  },
-  {
-    id: 'scene-05',
-    name: '分镜 05',
-    range: '00:00-00:04',
-    text: '阿斯顿发的\n刚刚我去二\n撒旦法水电费赶过去',
-  },
-  {
-    id: 'scene-06',
-    name: '分镜 06',
-    range: '00:00-00:04',
-    text: '谁的法谁的规',
-  },
-  {
-    id: 'scene-07',
-    name: '分镜 07',
-    range: '00:00-00:04',
-    text: '确认分镜顺序与字幕断句，\n逐段校对配音节奏。',
-  },
-  {
-    id: 'scene-08',
-    name: '分镜 08',
-    range: '00:00-00:04',
-    text: '检查画面与配音是否对齐，\n准备渲染导出成片。',
-  },
-];
 
 interface VideoBar extends TimelineClip {
   border: string;
@@ -231,8 +179,68 @@ function Waveform({ count }: { count: number }) {
   );
 }
 
-export function EditorVideoScreen() {
-  const [selectedClipId, setSelectedClipId] = useState('scene-02');
+type EditorScreenState = EditorLoadResult | { kind: 'loading' };
+
+/**
+ * 项目级编辑器入口：每次进入都按 projectId 重新读取最新 `project.json`。
+ * 草稿工程回创作消息页；读取失败或损坏工程停在错误页，可返回工作台。
+ */
+export function EditorVideoScreen({ projectId }: { projectId: string }) {
+  const [state, setState] = useState<EditorScreenState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ kind: 'loading' });
+
+    const reader = window.miaoma?.project;
+
+    if (!reader) {
+      setState({
+        code: 'IPC_UNAVAILABLE',
+        kind: 'error',
+        message: 'Preload 桥接未加载，无法打开工程。',
+      });
+      return;
+    }
+
+    void loadEditorProject(reader, projectId).then((result) => {
+      if (!cancelled) {
+        setState(result);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (state.kind === 'draft') {
+      window.location.hash = createChatHash(state.projectId);
+    }
+  }, [state]);
+
+  if (state.kind === 'loading') {
+    return <EditorLoading />;
+  }
+
+  if (state.kind === 'draft') {
+    return <EditorLoading message="草稿工程会被送回创作消息页。" title="正在返回创作消息页" />;
+  }
+
+  if (state.kind === 'error') {
+    return <EditorUnavailable message={state.message} />;
+  }
+
+  if (state.view.sceneCount === 0) {
+    return <EditorEmpty message="这个工程还没有分镜，请回到创作消息页生成内容。" />;
+  }
+
+  return <EditorWorkspace key={state.view.projectId} view={state.view} />;
+}
+
+function EditorWorkspace({ view }: { view: EditorProjectView }) {
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(view.scenes[0]?.id ?? null);
   const [activeRail, setActiveRail] = useState<EditorRailId>('video');
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -253,9 +261,9 @@ export function EditorVideoScreen() {
   const grabOffsetRef = useRef(0);
   const noticeTimer = useRef<number | null>(null);
 
-  const selectedClip = STORYBOARDS.find((clip) => clip.id === selectedClipId);
-  const selectedName = selectedClip?.name ?? '分镜 01';
-  const selectedRange = selectedClip?.range ?? '00:04-00:08';
+  const selectedScene = view.scenes.find((scene) => scene.id === selectedSceneId);
+  const selectedName = selectedScene?.title ?? '未选择分镜';
+  const selectedRange = selectedScene?.rangeLabel ?? '—';
   const playheadRatio = Math.min(1, Math.max(0, currentTime / TIMELINE_SPAN_SECONDS));
   const zoomScale = 1 + (zoom / 100) * 0.8;
 
@@ -451,8 +459,10 @@ export function EditorVideoScreen() {
         </button>
 
         <div className="ed-project">
-          <div className="ed-project-title">口播短片自动剪辑工程</div>
-          <div className="ed-project-meta">2 分钟前更新 · 已自动保存</div>
+          <div className="ed-project-title" title={view.name}>
+            {view.name}
+          </div>
+          <div className="ed-project-meta">{view.updatedLabel}</div>
         </div>
 
         <div className="ed-topbar-actions">
@@ -471,29 +481,31 @@ export function EditorVideoScreen() {
         <aside className="ed-left" aria-label="文稿字幕">
           <div className="ed-left-head">
             <h1>文稿字幕</h1>
-            <p>8 段分镜 · 00:30 · 当前 {selectedRange}</p>
+            <p>
+              {view.sceneCount} 段分镜 · {view.totalDurationLabel} · 当前 {selectedRange}
+            </p>
           </div>
 
           <div className="ed-clip-list">
-            {STORYBOARDS.map((clip) => {
-              const active = clip.id === selectedClipId;
+            {view.scenes.map((scene) => {
+              const active = scene.id === selectedSceneId;
 
               return (
                 <button
-                  key={clip.id}
+                  key={scene.id}
                   className={`ed-clip${active ? ' is-active' : ''}`}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => setSelectedClipId(clip.id)}
+                  onClick={() => setSelectedSceneId(scene.id)}
                 >
                   <span className="ed-clip-top">
                     <span className="ed-clip-name">
-                      {clip.name}
+                      {scene.title}
                       {active ? <span className="ed-clip-current">当前</span> : null}
                     </span>
-                    <span className="ed-clip-range">{clip.range}</span>
+                    <span className="ed-clip-range">{scene.rangeLabel}</span>
                   </span>
-                  <span className="ed-clip-text">{clip.text}</span>
+                  <span className="ed-clip-text">{scene.text}</span>
                 </button>
               );
             })}

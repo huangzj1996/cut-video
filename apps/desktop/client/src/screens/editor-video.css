@@ -137,10 +137,12 @@
 }
 
 .ed-project-title {
+  overflow: hidden;
   font-size: 20px;
   font-weight: 750;
   line-height: 1.2;
   letter-spacing: -0.01em;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1412,4 +1414,60 @@
   .ed-zoom-input {
     width: 72px;
   }
+}
+
+/* Loading and error fallbacks */
+
+.ed-fallback {
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.ed-fallback-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(520px, 100%);
+  padding: 28px 32px;
+  border: 1px solid var(--ed-line);
+  border-radius: 12px;
+  background: var(--ed-panel);
+}
+
+.ed-fallback-kicker {
+  color: var(--ed-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ed-fallback-card h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.ed-fallback-card p {
+  margin: 0;
+  color: var(--ed-text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.ed-fallback-action {
+  margin-top: 8px;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ed-red);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ed-fallback-action:hover {
+  filter: brightness(1.08);
 }

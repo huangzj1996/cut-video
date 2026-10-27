@@ -22,9 +22,23 @@ import { ProjectStore } from '../projects/project-store';
 import { desktopPromptProvider } from './prompts';
 import { WorkflowRunManager } from './run-manager';
 
-const FFMPEG = path.resolve('resources/ffmpeg/ffmpeg.exe');
-const FFPROBE = path.resolve('resources/ffmpeg/ffprobe.exe');
-const HAS_FFMPEG = existsSync(FFMPEG) && existsSync(FFPROBE);
+const FFMPEG =
+  process.platform === 'win32'
+    ? path.resolve('resources/ffmpeg/ffmpeg.exe')
+    : 'ffmpeg';
+const FFPROBE =
+  process.platform === 'win32'
+    ? path.resolve('resources/ffmpeg/ffprobe.exe')
+    : 'ffprobe';
+
+function canRun(binary: string): boolean {
+  return spawnSync(binary, ['-version'], { windowsHide: true }).status === 0;
+}
+
+// The bundled binaries are Windows executables; checking that they actually
+// run lets the suite skip on platforms that cannot execute them (Linux CI, or
+// WSL without Windows interop) instead of failing on spawn.
+const HAS_FFMPEG = canRun(FFMPEG) && canRun(FFPROBE);
 
 const SCRIPT =
   '这是第一段测试旁白，用来验证完整流程。这是第二段测试旁白，用来验证分镜、配音、匹配、组装和保存。';

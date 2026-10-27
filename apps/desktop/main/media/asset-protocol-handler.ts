@@ -23,7 +23,12 @@ function statFile(filePath: string): AssetFileStat | null {
 function toResponse(plan: ReturnType<typeof planAssetResponse>, method: string): Response {
   const headers = new Headers(plan.headers);
 
-  if (plan.body && method !== 'HEAD') {
+  // HEAD 只回响应头，不发送 GET 会返回的正文。
+  if (method === 'HEAD') {
+    return new Response(null, { headers, status: plan.status });
+  }
+
+  if (plan.body) {
     const stream = Readable.toWeb(
       createReadStream(plan.body.filePath, { end: plan.body.end, start: plan.body.start }),
     ) as ReadableStream;

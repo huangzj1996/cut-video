@@ -1,7 +1,6 @@
 import type {
   MusicClip,
   Scene,
-  StoredProject,
   SubtitleClip,
   VideoClip,
   VideoProject,
@@ -52,10 +51,10 @@ export interface EditorTimeline {
   tracks: EditorTrackView[];
 }
 
-function findTrack<T extends StoredProject['tracks'][number]['kind']>(
+function findTrack<T extends EditorTrackKind>(
   project: VideoProject,
   kind: T,
-) {
+): Extract<VideoProject['tracks'][number], { kind: T }> | undefined {
   return project.tracks.find((track) => track.kind === kind) as
     Extract<VideoProject['tracks'][number], { kind: T }> | undefined;
 }

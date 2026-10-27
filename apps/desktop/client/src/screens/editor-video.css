@@ -1256,10 +1256,6 @@
   transform: translateY(-50%);
 }
 
-.ed-voice-bar.is-pause {
-  background: #2c3038;
-}
-
 .ed-voice-name {
   flex: none;
   font-size: 13px;
@@ -1360,13 +1356,6 @@
   flex: none;
   color: #c7d0da;
   font-size: 11px;
-}
-
-.ed-tl-music-duration {
-  margin-left: auto;
-  color: #a9afba;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
 }
 
 .ed-playhead-layer {

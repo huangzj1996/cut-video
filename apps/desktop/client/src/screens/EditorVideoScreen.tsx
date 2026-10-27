@@ -105,7 +105,7 @@ const TIMELINE_TOOLS: readonly { id: TimelineToolId; label: string; icon: Editor
 function WaveformPlaceholder() {
   return (
     <span aria-label="波形待接入" className="ed-wave-placeholder" role="img">
-      <span>波形待接入</span>
+      波形待接入
     </span>
   );
 }
@@ -202,7 +202,6 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
   const selectedName = selectedScene?.title ?? '未选择分镜';
   const selectedRange = selectedScene?.rangeLabel ?? '—';
   const playheadRatio = Math.min(1, Math.max(0, currentTime / spanSeconds));
-  const zoomScale = zoom;
   const previewClips = useMemo<readonly TimelineClip[]>(() => {
     const videoTrack = timeline.tracks.find((track) => track.kind === 'video');
 
@@ -256,17 +255,20 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     }
   }, [currentTime, playing, spanSeconds]);
 
-  const seekFromClientX = useCallback((clientX: number, offsetSeconds: number) => {
-    const rect = rulerTrackRef.current?.getBoundingClientRect();
+  const seekFromClientX = useCallback(
+    (clientX: number, offsetSeconds: number) => {
+      const rect = rulerTrackRef.current?.getBoundingClientRect();
 
-    if (!rect) {
-      return;
-    }
+      if (!rect) {
+        return;
+      }
 
-    const time = clientXToTime(clientX, rect, spanSeconds) + offsetSeconds;
+      const time = clientXToTime(clientX, rect, spanSeconds) + offsetSeconds;
 
-    setCurrentTime(clampTime(time, spanSeconds));
-  }, []);
+      setCurrentTime(clampTime(time, spanSeconds));
+    },
+    [spanSeconds],
+  );
 
   const endScrub = useCallback((event?: ReactPointerEvent<HTMLDivElement>) => {
     if (event && activePointerIdRef.current !== event.pointerId) {
@@ -438,7 +440,7 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
         >
           <span className="ed-bar-accent" style={{ background: tone.accent }} />
           <span className="ed-video-name">{clip.label}</span>
-          {clip.thumbnailIds && clip.thumbnailIds.length > 0 ? (
+          {clip.thumbnailIds?.length ? (
             <span className="ed-thumbs" aria-hidden="true">
               {clip.thumbnailIds.slice(0, 4).map((thumbnailId) => (
                 <img
@@ -504,7 +506,9 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
 
   const renderTrackClips = (track: EditorTrackView) => {
     if (track.clips.length === 0) {
-      return track.kind === 'music' ? <div className="ed-track-empty">未添加音乐</div> : null;
+      return track.kind === 'music' ? (
+        <div className="ed-track-empty">{track.countLabel}</div>
+      ) : null;
     }
 
     return track.clips.map((clip, index) => renderTrackClip(track, clip, index));
@@ -865,7 +869,7 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
         <div className="ed-timeline-body">
           <div
             className={`ed-timeline-canvas${isScrubbing ? ' is-scrubbing' : ''}`}
-            style={{ width: `${zoomScale * 100}%` }}
+            style={{ width: `${zoom * 100}%` }}
             onLostPointerCapture={endScrub}
             onPointerCancel={endScrub}
             onPointerDown={handleTimelinePointerDown}

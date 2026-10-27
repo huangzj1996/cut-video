@@ -1,13 +1,15 @@
 /**
- * 项目级编辑器。左侧分镜、工程名与时长来自最新 `project.json`；
- * 预览和四轨时间线仍是静态占位，由后续切片接入真实媒体与编辑。
+ * 项目级编辑器。左侧分镜、工程名、四轨时间线都来自最新 `project.json`；
+ * 媒体通过受限 `asset://` 协议加载，预览播放由后续切片接入。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
+import type { VideoProject } from '@miaoma/video-project';
+import { assetUrl } from '../lib/media';
 import { createChatHash } from '../lib/routes';
 import { EditorEmpty, EditorLoading, EditorUnavailable } from './editor-video/EditorStates';
 import {
@@ -16,6 +18,15 @@ import {
   type EditorProjectView,
 } from './editor-video/project-view';
 import { PreviewStage } from './editor-video/PreviewStage';
+import { createSelection, selectionReducer } from './editor-video/selection';
+import {
+  buildEditorTimeline,
+  sliderFromZoom,
+  zoomFromSlider,
+  type EditorTrackKind,
+  type EditorTrackView,
+  type TimelineTrackClip,
+} from './editor-video/timeline-geometry';
 import {
   clampTime,
   clientXToTime,
@@ -29,109 +40,30 @@ import { SubtitlePanel } from './panels/SubtitlePanel';
 import { VoicePanel } from './panels/VoicePanel';
 import './editor-video.css';
 
-const TOTAL_SECONDS = 87;
-const TIMELINE_SPAN_SECONDS = 114.8;
-const TICK_STEP_PERCENT = 8.716;
-
-interface VideoBar extends TimelineClip {
+interface VideoTone {
+  accent: string;
+  background: string;
   border: string;
 }
 
-const VIDEO_BAR_STYLES = [
-  {
-    id: 'video-01',
-    label: '分镜01',
-    background: '#1f6158',
-    border: '#25d0b1',
-    accent: '#25d0b1',
-  },
-  {
-    id: 'video-02',
-    label: '分镜02',
-    background: '#294673',
-    border: 'rgba(255,255,255,0.125)',
-    accent: '#5b8cff',
-  },
-  {
-    id: 'video-03',
-    label: '分镜03',
-    background: '#503984',
-    border: 'rgba(255,255,255,0.125)',
-    accent: '#8b6af7',
-  },
-  {
-    id: 'video-04',
-    label: '分镜04',
-    background: '#74313e',
-    border: 'rgba(255,255,255,0.125)',
-    accent: '#f05f73',
-  },
-  {
-    id: 'video-05',
-    label: '分镜05',
-    background: '#3d3f45',
-    border: 'rgba(255,255,255,0.125)',
-    accent: '#7e848e',
-  },
-] as const;
+const VIDEO_TONES: readonly VideoTone[] = [
+  { accent: '#25d0b1', background: '#1f6158', border: '#25d0b1' },
+  { accent: '#5b8cff', background: '#294673', border: 'rgba(255,255,255,0.125)' },
+  { accent: '#8b6af7', background: '#503984', border: 'rgba(255,255,255,0.125)' },
+  { accent: '#f05f73', background: '#74313e', border: 'rgba(255,255,255,0.125)' },
+  { accent: '#7e848e', background: '#3d3f45', border: 'rgba(255,255,255,0.125)' },
+];
 
-// 片段只铺满工程时长 00:00-01:27；之后到标尺末端是空白死区。
-const VIDEO_BARS: readonly VideoBar[] = VIDEO_BAR_STYLES.map((bar, index, all) => ({
-  ...bar,
-  startSeconds: (index * TOTAL_SECONDS) / all.length,
-  endSeconds: ((index + 1) * TOTAL_SECONDS) / all.length,
-}));
-
-interface VoiceBar {
-  id: string;
-  label: string;
-  startSeconds: number;
-  endSeconds: number;
-  waveBars: number;
-  pause?: boolean;
+function videoTone(index: number): VideoTone {
+  return VIDEO_TONES[index % VIDEO_TONES.length]!;
 }
 
-const VOICE_BARS: readonly VoiceBar[] = [
-  {
-    id: 'voice-01',
-    label: 'IndexTTS2 口播',
-    startSeconds: 0,
-    endSeconds: TOTAL_SECONDS * 0.52,
-    waveBars: 16,
-  },
-  {
-    id: 'voice-02',
-    label: '停顿',
-    startSeconds: TOTAL_SECONDS * 0.52,
-    endSeconds: TOTAL_SECONDS * 0.6,
-    waveBars: 2,
-    pause: true,
-  },
-  {
-    id: 'voice-03',
-    label: '旁白 02',
-    startSeconds: TOTAL_SECONDS * 0.6,
-    endSeconds: TOTAL_SECONDS,
-    waveBars: 13,
-  },
-];
-
-const WAVE_HEIGHTS = [8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8, 12, 16, 20, 24, 8];
-
-const TICKS = [
-  '00:00',
-  '00:10',
-  '00:20',
-  '00:30',
-  '00:40',
-  '00:50',
-  '01:00',
-  '01:10',
-  '01:20',
-  '01:30',
-  '01:40',
-  '01:50',
-];
+const TRACK_ICONS: Record<EditorTrackKind, EditorIconName> = {
+  music: 'music',
+  subtitle: 'subtitle-track',
+  video: 'video-track',
+  voice: 'mic-track',
+};
 
 const ANALYSIS_TEXT = `我来分析你的文稿，这是一份关于“前端AI进阶学习路线”的教学内容，时间线清晰、结构完整。让我先加载制片技能来完成方案设计。
 
@@ -167,14 +99,13 @@ const TIMELINE_TOOLS: readonly { id: TimelineToolId; label: string; icon: Editor
   { id: 'wave', label: '波形', icon: 'wave' },
 ];
 
-const CONTENT_END_PERCENT = secondsToPercent(TOTAL_SECONDS, TIMELINE_SPAN_SECONDS);
-
-function Waveform({ count }: { count: number }) {
+/**
+ * 波形区域先占位，不伪造峰值；真实峰值在后续切片接入。
+ */
+function WaveformPlaceholder() {
   return (
-    <span className="ed-waveform" aria-hidden="true">
-      {WAVE_HEIGHTS.slice(0, count).map((height, index) => (
-        <span key={index} style={{ height }} />
-      ))}
+    <span aria-label="波形待接入" className="ed-wave-placeholder" role="img">
+      <span>波形待接入</span>
     </span>
   );
 }
@@ -236,18 +167,24 @@ export function EditorVideoScreen({ projectId }: { projectId: string }) {
     return <EditorEmpty message="这个工程还没有分镜，请回到创作消息页生成内容。" />;
   }
 
-  return <EditorWorkspace key={state.view.projectId} view={state.view} />;
+  return <EditorWorkspace key={state.view.projectId} project={state.project} view={state.view} />;
 }
 
-function EditorWorkspace({ view }: { view: EditorProjectView }) {
-  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(view.scenes[0]?.id ?? null);
+function EditorWorkspace({ project, view }: { project: VideoProject; view: EditorProjectView }) {
+  const timeline = useMemo(() => buildEditorTimeline(project), [project]);
+  const spanSeconds = timeline.durationSeconds > 0 ? timeline.durationSeconds : 1;
+  const [selection, dispatch] = useReducer(
+    selectionReducer,
+    view.scenes[0]?.id ?? null,
+    (sceneId) => createSelection(sceneId),
+  );
   const [activeRail, setActiveRail] = useState<EditorRailId>('video');
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [contextOpen, setContextOpen] = useState(true);
   const [quickOpen, setQuickOpen] = useState(true);
   const [draft, setDraft] = useState('');
-  const [zoom, setZoom] = useState(0);
+  const [zoom, setZoom] = useState(1);
   const [tools, setTools] = useState<Record<TimelineToolId, boolean>>({
     snap: true,
     link: false,
@@ -261,11 +198,22 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
   const grabOffsetRef = useRef(0);
   const noticeTimer = useRef<number | null>(null);
 
-  const selectedScene = view.scenes.find((scene) => scene.id === selectedSceneId);
+  const selectedScene = view.scenes.find((scene) => scene.id === selection.sceneId);
   const selectedName = selectedScene?.title ?? '未选择分镜';
   const selectedRange = selectedScene?.rangeLabel ?? '—';
-  const playheadRatio = Math.min(1, Math.max(0, currentTime / TIMELINE_SPAN_SECONDS));
-  const zoomScale = 1 + (zoom / 100) * 0.8;
+  const playheadRatio = Math.min(1, Math.max(0, currentTime / spanSeconds));
+  const zoomScale = zoom;
+  const previewClips = useMemo<readonly TimelineClip[]>(() => {
+    const videoTrack = timeline.tracks.find((track) => track.kind === 'video');
+
+    return (videoTrack?.clips ?? []).map((clip, index) => ({
+      ...videoTone(index),
+      endSeconds: clip.endSeconds,
+      id: clip.id,
+      label: clip.label,
+      startSeconds: clip.startSeconds,
+    }));
+  }, [timeline]);
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -294,19 +242,19 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
     }
 
     const timer = window.setInterval(() => {
-      setCurrentTime((time) => Math.min(TOTAL_SECONDS, time + 0.1));
+      setCurrentTime((time) => Math.min(spanSeconds, time + 0.1));
     }, 100);
 
     return () => {
       window.clearInterval(timer);
     };
-  }, [playing]);
+  }, [playing, spanSeconds]);
 
   useEffect(() => {
-    if (playing && currentTime >= TOTAL_SECONDS) {
+    if (playing && currentTime >= spanSeconds) {
       setPlaying(false);
     }
-  }, [currentTime, playing]);
+  }, [currentTime, playing, spanSeconds]);
 
   const seekFromClientX = useCallback((clientX: number, offsetSeconds: number) => {
     const rect = rulerTrackRef.current?.getBoundingClientRect();
@@ -315,9 +263,9 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
       return;
     }
 
-    const time = clientXToTime(clientX, rect, TIMELINE_SPAN_SECONDS) + offsetSeconds;
+    const time = clientXToTime(clientX, rect, spanSeconds) + offsetSeconds;
 
-    setCurrentTime(clampTime(time, TIMELINE_SPAN_SECONDS));
+    setCurrentTime(clampTime(time, spanSeconds));
   }, []);
 
   const endScrub = useCallback((event?: ReactPointerEvent<HTMLDivElement>) => {
@@ -355,7 +303,7 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
 
     if (target.closest('.ed-playhead')) {
       const rect = rulerTrackRef.current?.getBoundingClientRect();
-      const pointerTime = rect ? clientXToTime(event.clientX, rect, TIMELINE_SPAN_SECONDS) : 0;
+      const pointerTime = rect ? clientXToTime(event.clientX, rect, spanSeconds) : 0;
 
       grabOffsetRef.current = currentTime - pointerTime;
       return;
@@ -398,7 +346,7 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
         nextTime = 0;
         break;
       case 'End':
-        nextTime = TIMELINE_SPAN_SECONDS;
+        nextTime = spanSeconds;
         break;
       default:
         return;
@@ -406,7 +354,7 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
 
     event.preventDefault();
     setPlaying(false);
-    setCurrentTime(clampTime(nextTime, TIMELINE_SPAN_SECONDS));
+    setCurrentTime(clampTime(nextTime, spanSeconds));
   };
 
   const scrollToBottom = () => {
@@ -436,6 +384,130 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
 
     setTools((previous) => ({ ...previous, [id]: next }));
     notify(`${label}已${next ? '开启' : '关闭'}；时间线交互将在 T17 接入。`);
+  };
+
+  const selectClip = (clip: TimelineTrackClip) => {
+    dispatch({
+      clipId: clip.id,
+      kind: clip.kind,
+      ...(clip.sceneId ? { sceneId: clip.sceneId } : {}),
+      type: 'select-clip',
+    });
+  };
+
+  const isClipSelected = (clip: TimelineTrackClip) =>
+    selection.clip?.id === clip.id && selection.clip.kind === clip.kind;
+
+  const selectScene = (sceneId: string, startSeconds: number) => {
+    setPlaying(false);
+    setCurrentTime(clampTime(startSeconds, spanSeconds));
+    dispatch({ sceneId, type: 'select-scene' });
+  };
+
+  const clipStyle = (clip: TimelineTrackClip) => ({
+    left: `${secondsToPercent(clip.startSeconds, spanSeconds)}%`,
+    width: `${secondsToPercent(clip.endSeconds - clip.startSeconds, spanSeconds)}%`,
+  });
+
+  const clipPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    // 片段点击只负责选中，不触发轨道空白处的 seek / 拖动播放头。
+    event.stopPropagation();
+  };
+
+  const renderTrackClip = (track: EditorTrackView, clip: TimelineTrackClip, index: number) => {
+    const selected = isClipSelected(clip);
+    const activeClass = selected ? ' is-active' : '';
+    const shared = {
+      'aria-pressed': selected,
+      onClick: () => selectClip(clip),
+      onPointerDown: clipPointerDown,
+      style: clipStyle(clip),
+      type: 'button' as const,
+    };
+
+    if (track.kind === 'video') {
+      const tone = videoTone(index);
+
+      return (
+        <button
+          key={clip.id}
+          {...shared}
+          className={`ed-timeline-clip ed-video-bar${activeClass}`}
+          style={{ ...shared.style, background: tone.background, borderColor: tone.border }}
+          title={clip.label}
+        >
+          <span className="ed-bar-accent" style={{ background: tone.accent }} />
+          <span className="ed-video-name">{clip.label}</span>
+          {clip.thumbnailIds && clip.thumbnailIds.length > 0 ? (
+            <span className="ed-thumbs" aria-hidden="true">
+              {clip.thumbnailIds.slice(0, 4).map((thumbnailId) => (
+                <img
+                  key={thumbnailId}
+                  alt=""
+                  className="ed-thumb"
+                  loading="lazy"
+                  src={assetUrl(view.projectId, thumbnailId)}
+                />
+              ))}
+            </span>
+          ) : (
+            <span className="ed-thumb-fallback" aria-hidden="true" />
+          )}
+        </button>
+      );
+    }
+
+    if (track.kind === 'voice') {
+      return (
+        <button
+          key={clip.id}
+          {...shared}
+          className={`ed-timeline-clip ed-voice-bar${activeClass}`}
+          title={clip.label}
+        >
+          <span className="ed-voice-name">{clip.label}</span>
+          {clip.badge ? <span className="ed-clip-badge">{clip.badge}</span> : null}
+          <WaveformPlaceholder />
+        </button>
+      );
+    }
+
+    if (track.kind === 'subtitle') {
+      return (
+        <button
+          key={clip.id}
+          {...shared}
+          className={`ed-timeline-clip ed-subtitle-bar${activeClass}`}
+          title={clip.text ?? clip.label}
+        >
+          <EditorIcon name="subtitles" size={16} />
+          <span className="ed-subtitle-text">{clip.text ?? clip.label}</span>
+        </button>
+      );
+    }
+
+    return (
+      <button
+        key={clip.id}
+        {...shared}
+        className={`ed-timeline-clip ed-tl-music-bar${activeClass}`}
+        title={clip.label}
+      >
+        <span className="ed-bar-accent" style={{ background: 'var(--ed-blue)' }} />
+        <EditorIcon name="music" size={15} />
+        <span className="ed-tl-music-name">{clip.label}</span>
+        {clip.artist ? <span className="ed-tl-music-artist">{clip.artist}</span> : null}
+        <WaveformPlaceholder />
+      </button>
+    );
+  };
+
+  const renderTrackClips = (track: EditorTrackView) => {
+    if (track.clips.length === 0) {
+      return track.kind === 'music' ? <div className="ed-track-empty">未添加音乐</div> : null;
+    }
+
+    return track.clips.map((clip, index) => renderTrackClip(track, clip, index));
   };
 
   return (
@@ -488,7 +560,7 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
 
           <div className="ed-clip-list">
             {view.scenes.map((scene) => {
-              const active = scene.id === selectedSceneId;
+              const active = scene.id === selection.sceneId;
 
               return (
                 <button
@@ -496,7 +568,7 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
                   className={`ed-clip${active ? ' is-active' : ''}`}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => setSelectedSceneId(scene.id)}
+                  onClick={() => selectScene(scene.id, scene.startSeconds)}
                 >
                   <span className="ed-clip-top">
                     <span className="ed-clip-name">
@@ -514,13 +586,13 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
 
         <section className="ed-center" aria-label="视频预览">
           <PreviewStage
-            clips={VIDEO_BARS}
+            clips={previewClips}
             currentTime={currentTime}
-            projectSeconds={TOTAL_SECONDS}
+            projectSeconds={spanSeconds}
           />
           <div className="ed-preview-bar">
             <span className="ed-preview-time">
-              {formatTime(currentTime)} <span>/ {formatTime(TOTAL_SECONDS)}</span>
+              {formatTime(currentTime)} <span>/ {formatTime(spanSeconds)}</span>
             </span>
 
             <button
@@ -529,7 +601,7 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
               aria-label={playing ? '暂停' : '播放'}
               aria-pressed={playing}
               onClick={() => {
-                if (currentTime >= TOTAL_SECONDS) {
+                if (currentTime >= spanSeconds) {
                   setCurrentTime(0);
                 }
 
@@ -718,7 +790,7 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
           <div className="ed-timeline-left">
             <span className="ed-timeline-title">时间线</span>
             <span className="ed-timecode">
-              {formatTime(currentTime)} / {formatTime(TOTAL_SECONDS)}
+              {formatTime(currentTime)} / {formatTime(spanSeconds)}
             </span>
             <div className="ed-history">
               <button
@@ -770,12 +842,13 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
                 type="range"
                 min={0}
                 max={100}
-                value={zoom}
+                value={sliderFromZoom(zoom)}
                 aria-label="时间线缩放"
-                style={{ '--zoom-progress': `${zoom}%` } as CSSProperties}
-                onChange={(event) => setZoom(Number(event.target.value))}
+                style={{ '--zoom-progress': `${sliderFromZoom(zoom)}%` } as CSSProperties}
+                onChange={(event) => setZoom(zoomFromSlider(Number(event.target.value)))}
               />
               <EditorIcon name="plus" size={14} />
+              <span className="ed-zoom-value">{zoom.toFixed(1)}x</span>
             </div>
 
             <button
@@ -809,122 +882,35 @@ function EditorWorkspace({ view }: { view: EditorProjectView }) {
                 aria-label="播放头位置"
                 aria-orientation="horizontal"
                 aria-valuemin={0}
-                aria-valuemax={TIMELINE_SPAN_SECONDS}
-                aria-valuenow={Math.min(TIMELINE_SPAN_SECONDS, Math.round(currentTime * 10) / 10)}
+                aria-valuemax={spanSeconds}
+                aria-valuenow={Math.min(spanSeconds, Math.round(currentTime * 10) / 10)}
                 aria-valuetext={formatTime(currentTime)}
                 onKeyDown={handleSeekKey}
               >
-                {TICKS.map((tick, index) => (
+                {timeline.ticks.map((tick) => (
                   <span
-                    key={tick}
+                    key={tick.seconds}
                     className="ed-tick"
-                    style={{ left: `${index * TICK_STEP_PERCENT}%` }}
+                    style={{ left: `${secondsToPercent(tick.seconds, spanSeconds)}%` }}
                   >
-                    <span className="ed-tick-label">{tick}</span>
+                    <span className="ed-tick-label">{tick.label}</span>
                   </span>
                 ))}
               </div>
             </div>
 
-            <div className="ed-track-row ed-track-video">
-              <div className="ed-track-label">
-                <EditorIcon name="video-track" size={18} />
-                <span className="ed-track-meta">
-                  <span className="ed-track-name">视频 1</span>
-                  <span className="ed-track-sub">5 个分镜</span>
-                </span>
-              </div>
-              <div className="ed-track-content">
-                {VIDEO_BARS.map((bar) => (
-                  <div
-                    key={bar.id}
-                    className="ed-video-bar"
-                    style={{
-                      left: `${secondsToPercent(bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
-                      width: `${secondsToPercent(bar.endSeconds - bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
-                      background: bar.background,
-                      borderColor: bar.border,
-                    }}
-                  >
-                    <span className="ed-bar-accent" style={{ background: bar.accent }} />
-                    <span className="ed-video-name">{bar.label}</span>
-                    <span className="ed-thumbs" aria-hidden="true">
-                      <span className="ed-thumb is-light" />
-                      <span className="ed-thumb" />
-                      <span className="ed-thumb is-light" />
-                      <span className="ed-thumb" />
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="ed-track-row ed-track-voice">
-              <div className="ed-track-label">
-                <EditorIcon name="mic-track" size={18} />
-                <span className="ed-track-meta">
-                  <span className="ed-track-name">配音</span>
-                  <span className="ed-track-sub">IndexTTS2 + 旁白</span>
-                </span>
-              </div>
-              <div className="ed-track-content">
-                {VOICE_BARS.map((bar) => (
-                  <div
-                    key={bar.id}
-                    className={`ed-voice-bar${bar.pause ? ' is-pause' : ''}`}
-                    style={{
-                      left: `${secondsToPercent(bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
-                      width: `${secondsToPercent(bar.endSeconds - bar.startSeconds, TIMELINE_SPAN_SECONDS)}%`,
-                    }}
-                  >
-                    <span className="ed-voice-name">{bar.label}</span>
-                    <Waveform count={bar.waveBars} />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="ed-track-row ed-track-subtitle">
-              <div className="ed-track-label">
-                <EditorIcon name="subtitle-track" size={18} />
-                <span className="ed-track-meta">
-                  <span className="ed-track-name">字幕</span>
-                  <span className="ed-track-sub">Whisper 已对齐</span>
-                </span>
-              </div>
-              <div className="ed-track-content">
-                <div
-                  className="ed-subtitle-bar"
-                  style={{ left: '0%', width: `${CONTENT_END_PERCENT}%` }}
-                >
-                  <EditorIcon name="subtitles" size={16} />
-                  <span>Whisper 字幕 · 自动断句 · 可逐字微调</span>
+            {timeline.tracks.map((track) => (
+              <div key={track.kind} className={`ed-track-row ed-track-${track.kind}`}>
+                <div className="ed-track-label">
+                  <EditorIcon name={TRACK_ICONS[track.kind]} size={18} />
+                  <span className="ed-track-meta">
+                    <span className="ed-track-name">{track.title}</span>
+                    <span className="ed-track-sub">{track.countLabel}</span>
+                  </span>
                 </div>
+                <div className="ed-track-content">{renderTrackClips(track)}</div>
               </div>
-            </div>
-
-            <div className="ed-track-row ed-track-music">
-              <div className="ed-track-label">
-                <EditorIcon name="music" size={18} />
-                <span className="ed-track-meta">
-                  <span className="ed-track-name">音乐</span>
-                  <span className="ed-track-sub">Eutopia · 02:01</span>
-                </span>
-              </div>
-              <div className="ed-track-content">
-                <div
-                  className="ed-tl-music-bar"
-                  style={{ left: '0%', width: `${CONTENT_END_PERCENT}%` }}
-                >
-                  <span className="ed-bar-accent" style={{ background: 'var(--ed-blue)' }} />
-                  <EditorIcon name="music" size={15} />
-                  <span className="ed-tl-music-name">Eutopia</span>
-                  <span className="ed-tl-music-artist">Mika Chen</span>
-                  <Waveform count={12} />
-                  <span className="ed-tl-music-duration">02:01</span>
-                </div>
-              </div>
-            </div>
+            ))}
 
             <div aria-hidden="true" className="ed-playhead-layer">
               <div className="ed-playhead" style={{ left: `${playheadRatio * 100}%` }}>

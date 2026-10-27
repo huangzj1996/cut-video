@@ -3,8 +3,10 @@ import type { IpcErrorCode, IpcResponse } from '../../../../shared/ipc-contract'
 import { isValidProjectId } from '../../lib/routes';
 
 export interface EditorSceneView {
+  endSeconds: number;
   id: string;
   rangeLabel: string;
+  startSeconds: number;
   text: string;
   title: string;
 }
@@ -21,7 +23,7 @@ export interface EditorProjectView {
 export type EditorLoadResult =
   | { kind: 'draft'; projectId: string }
   | { code: IpcErrorCode; kind: 'error'; message: string }
-  | { kind: 'ready'; view: EditorProjectView };
+  | { kind: 'ready'; project: VideoProject; view: EditorProjectView };
 
 export interface ProjectReader {
   get(projectId: string): Promise<IpcResponse<StoredProject>>;
@@ -89,8 +91,10 @@ export function buildEditorProjectView(
     cursorMs = endMs;
 
     return {
+      endSeconds: endMs / 1_000,
       id: scene.id,
       rangeLabel: `${formatEditorClock(startMs)}-${formatEditorClock(endMs)}`,
+      startSeconds: startMs / 1_000,
       text: sceneSubtitleText(scene.id, subtitleTrack) || scene.script,
       title: sceneLabel(scene),
     };
@@ -164,5 +168,9 @@ export async function loadEditorProject(
     return { kind: 'draft', projectId };
   }
 
-  return { kind: 'ready', view: buildEditorProjectView(response.data, nowMs) };
+  return {
+    kind: 'ready',
+    project: response.data,
+    view: buildEditorProjectView(response.data, nowMs),
+  };
 }

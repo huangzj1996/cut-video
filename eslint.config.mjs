@@ -5,6 +5,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/node_modules/**',
+      '**/.pnpm-store/**',
       '**/.vite/**',
       '**/out/**',
       '**/dist/**',
@@ -28,6 +29,20 @@ export default tseslint.config(
     files: ['**/*.config.{ts,mts,js,mjs}', 'forge.config.ts'],
     rules: {
       'no-undef': 'off',
+    },
+  },
+  {
+    // Sandcastle 的 Node 脚本不在应用构建中；它们使用 Node 全局变量与中文提示。
+    files: ['.sandcastle/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        fetch: 'readonly',
+        process: 'readonly',
+      },
+    },
+    rules: {
+      'no-irregular-whitespace': 'off',
     },
   },
 );

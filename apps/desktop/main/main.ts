@@ -28,6 +28,7 @@ import {
 import { ChatService } from './chat/chat-service';
 import { ChatStore } from './chat/chat-store';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
+import { registerAssetProtocol, registerAssetScheme } from './media/asset-protocol-handler';
 import { isBinaryAvailable } from './media/binary-check';
 import { resolveMediaBinary } from './media/ffmpeg-path';
 import { ProjectStore } from './projects/project-store';
@@ -48,6 +49,9 @@ if (started) {
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.miaoma.magicut');
 }
+
+// 自定义协议必须在 app ready 之前登记；渲染进程只认 assetId，不触碰 file://。
+registerAssetScheme();
 
 function buildMediaInfo(): MediaInfo {
   const common = {
@@ -472,6 +476,7 @@ void app.whenReady().then(() => {
   loadDevelopmentEnv();
   Menu.setApplicationMenu(null);
   registerIpcHandlers();
+  registerAssetProtocol((projectId) => getProjectStore().get(projectId));
   getWorkflowRunManager().recover();
   createWindow();
 

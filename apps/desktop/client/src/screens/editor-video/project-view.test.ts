@@ -235,6 +235,15 @@ describe('buildEditorProjectView', () => {
     expect(view.scenes.map((scene) => scene.rangeLabel)).toEqual(['00:00-00:04', '00:04-00:10']);
   });
 
+  it('exposes scene start and end seconds for timeline seeking', () => {
+    const view = buildEditorProjectView(VIDEO_PROJECT, NOW_MS);
+
+    expect(view.scenes.map((scene) => [scene.startSeconds, scene.endSeconds])).toEqual([
+      [0, 4],
+      [4, 10],
+    ]);
+  });
+
   it('joins subtitle text in time order and falls back to the scene script', () => {
     const view = buildEditorProjectView(VIDEO_PROJECT, NOW_MS);
 
@@ -286,6 +295,8 @@ describe('loadEditorProject', () => {
     if (result.kind === 'ready') {
       expect(result.view.name).toBe('真实工程');
       expect(result.view.sceneCount).toBe(2);
+      expect(result.project.project.projectId).toBe('project-1');
+      expect(result.project.tracks).toHaveLength(4);
     }
   });
 

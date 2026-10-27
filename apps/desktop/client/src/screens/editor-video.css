@@ -937,6 +937,15 @@
   color: var(--ed-muted);
 }
 
+.ed-zoom-value {
+  min-width: 34px;
+  color: var(--ed-text-2);
+  font-family: var(--ed-mono);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
 .ed-zoom-input {
   width: 92px;
   height: 12px;
@@ -1185,15 +1194,49 @@
 }
 
 .ed-thumb {
+  display: block;
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.14);
+  object-fit: cover;
 }
 
-.ed-thumb.is-light {
-  background: rgba(255, 255, 255, 0.15);
+.ed-thumb-fallback {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px dashed rgba(255, 255, 255, 0.32);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ed-timeline-clip {
+  cursor: pointer;
+  font: inherit;
+}
+
+.ed-timeline-clip.is-active {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+}
+
+.ed-clip-badge {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.24);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ed-subtitle-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ed-voice-bar {
@@ -1223,18 +1266,39 @@
   font-weight: 750;
 }
 
-.ed-waveform {
-  display: flex;
+.ed-wave-placeholder {
+  display: inline-flex;
   flex: none;
-  gap: 3px;
   align-items: center;
-  height: 24px;
+  justify-content: center;
+  min-width: 64px;
+  max-width: 120px;
+  height: 22px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  border-radius: 4px;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0 2px, transparent 2px 6px);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
-.ed-waveform span {
-  width: 3px;
-  border-radius: 9999px;
-  background: rgba(191, 255, 226, 0.4);
+.ed-track-empty {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--ed-line);
+  border-radius: 6px;
+  color: var(--ed-muted);
+  font-size: 11px;
+  font-weight: 600;
+  transform: translateY(-50%);
 }
 
 .ed-subtitle-bar {
@@ -1296,10 +1360,6 @@
   flex: none;
   color: #c7d0da;
   font-size: 11px;
-}
-
-.ed-tl-music-bar .ed-waveform span {
-  background: rgba(220, 231, 255, 0.5);
 }
 
 .ed-tl-music-duration {

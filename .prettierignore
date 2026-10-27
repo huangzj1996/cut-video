@@ -9,3 +9,4 @@ docs
 *.pen
 .claude/skills
 .agents/skills
+.sandcastle

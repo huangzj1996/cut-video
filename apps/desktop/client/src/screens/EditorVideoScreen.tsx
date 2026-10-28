@@ -42,7 +42,15 @@ import {
   type TimelineTrackClip,
 } from './editor-video/timeline-geometry';
 import { clampTime, clientXToTime, formatTime, secondsToPercent } from './editor-video/timeline';
+import { useAudioWaveforms } from './editor-video/useAudioWaveforms';
 import { usePlaybackClock } from './editor-video/usePlaybackClock';
+import {
+  sampleMusicWaveform,
+  sampleVoiceWaveform,
+  waveformBars,
+  waveformPath,
+  type WaveformBar,
+} from './editor-video/waveform';
 import { EditorIcon, type EditorIconName } from './editor-icons';
 import { MusicPanel } from './panels/MusicPanel';
 import { SubtitlePanel } from './panels/SubtitlePanel';
@@ -108,14 +116,45 @@ const TIMELINE_TOOLS: readonly { id: TimelineToolId; label: string; icon: Editor
   { id: 'wave', label: '波形', icon: 'wave' },
 ];
 
+type EditableClipKind = 'music' | 'subtitle';
+type ClipDragMode = 'move' | 'trim-end' | 'trim-start';
+
+interface ClipDragState {
+  clipId: string;
+  deltaMs: number;
+  kind: EditableClipKind;
+  mode: ClipDragMode;
+}
+
+interface ClipWaveformState {
+  bars: WaveformBar[] | null;
+  state: 'failed' | 'loading' | 'ready';
+}
+
 /**
- * 波形区域先占位，不伪造峰值；真实峰值在后续切片接入。
+ * 时间线上的真实波形：解码成功画峰值柱，静音素材是居中的平线；
+ * 读取或解码失败时回退到静态占位，不抛错也不伪造峰值。
  */
-function WaveformPlaceholder() {
+function ClipWaveform({ bars, state }: ClipWaveformState) {
+  if (state !== 'ready' || !bars) {
+    const label = state === 'failed' ? '波形不可用' : '波形加载中';
+
+    return (
+      <span aria-label={label} className="ed-wave-placeholder" role="img">
+        {label}
+      </span>
+    );
+  }
+
   return (
-    <span aria-label="波形待接入" className="ed-wave-placeholder" role="img">
-      波形待接入
-    </span>
+    <svg
+      aria-hidden="true"
+      className="ed-wave"
+      preserveAspectRatio="none"
+      viewBox={`0 0 ${bars.length} 100`}
+    >
+      <path d={waveformPath(bars)} />
+    </svg>
   );
 }
 
@@ -250,12 +289,13 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   const [tools, setTools] = useState<Record<TimelineToolId, boolean>>({
     snap: true,
     link: false,
-    wave: false,
+    wave: true,
   });
   const [notice, setNotice] = useState<string | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [draggingSceneId, setDraggingSceneId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [clipDrag, setClipDrag] = useState<ClipDragState | null>(null);
   const [trimPreview, setTrimPreview] = useState<{ clipId: string; deltaMs: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rulerTrackRef = useRef<HTMLDivElement>(null);
@@ -264,7 +304,6 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   const grabOffsetRef = useRef(0);
   const noticeTimer = useRef<number | null>(null);
   const sessionRef = useRef<EditorSessionState>(session);
-  const selectionRef = useRef(selection);
   const autosaveRef = useRef<AutosaveController | null>(null);
   const editSeqRef = useRef(session.editSeq);
   const suppressClickRef = useRef(false);
@@ -283,9 +322,16 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     sceneId: string;
     targetIndex: number;
   } | null>(null);
+  const clipDragRef = useRef<{
+    clipId: string;
+    deltaMs: number;
+    kind: EditableClipKind;
+    mode: ClipDragMode;
+    originClientX: number;
+    pointerId: number;
+  } | null>(null);
 
   sessionRef.current = session;
-  selectionRef.current = selection;
 
   const selectedScene = view.scenes.find((scene) => scene.id === selection.sceneId);
   const selectedName = selectedScene?.title ?? '未选择分镜';
@@ -324,6 +370,29 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
 
     return ids;
   }, [session.project]);
+  const audioAssetsById = useMemo(() => {
+    const byId = new Map<string, { durationMs: number }>();
+
+    for (const asset of [...session.project.assets.voices, ...session.project.assets.music]) {
+      byId.set(asset.id, { durationMs: asset.durationMs });
+    }
+
+    return byId;
+  }, [session.project]);
+  const audioAssetIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    for (const track of session.project.tracks) {
+      if (track.kind === 'voice' || track.kind === 'music') {
+        for (const clip of track.clips) {
+          ids.add(clip.assetId);
+        }
+      }
+    }
+
+    return [...ids];
+  }, [session.project]);
+  const waveforms = useAudioWaveforms(view.projectId, audioAssetIds, tools.wave);
   const saveKind =
     session.saveStatus === 'conflict'
       ? 'conflict'
@@ -489,36 +558,16 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     return unsubscribe;
   }, []);
 
-  // Delete 删除选中片段（视频/配音会被拒绝并提示）；Ctrl+S 保存；Ctrl+Z/Y 撤销重做。
+  // Ctrl+S 立即保存；Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 撤销重做。
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const editingText = Boolean(target?.closest('input, textarea, [contenteditable="true"]'));
-      const key = event.key.toLowerCase();
-
-      if ((event.key === 'Delete' || event.key === 'Backspace') && !editingText) {
-        event.preventDefault();
-
-        const current = selectionRef.current;
-
-        if (current.clip) {
-          sessionDispatch({
-            action: { clipId: current.clip.id, type: 'delete-clip' },
-            type: 'edit',
-          });
-        } else if (current.sceneId) {
-          sessionDispatch({
-            action: { sceneId: current.sceneId, type: 'remove-scene' },
-            type: 'edit',
-          });
-        }
-
-        return;
-      }
-
       if (!(event.ctrlKey || event.metaKey)) {
         return;
       }
+
+      const target = event.target as HTMLElement | null;
+      const editingText = Boolean(target?.closest('input, textarea, [contenteditable="true"]'));
+      const key = event.key.toLowerCase();
 
       if (key === 's') {
         event.preventDefault();
@@ -565,9 +614,14 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     notify('已重新加载最新工程。');
   }, [notify]);
 
-  const performEdit = useCallback((action: EditAction) => {
-    sessionDispatch({ action, type: 'edit' });
-  }, []);
+  const performEdit = useCallback(
+    (action: EditAction) => {
+      // 编辑时自动暂停，避免媒体继续播放导致预览与新的时间线错位。
+      pause();
+      sessionDispatch({ action, type: 'edit' });
+    },
+    [pause],
+  );
 
   const seekFromClientX = useCallback(
     (clientX: number, offsetSeconds: number) => {
@@ -699,7 +753,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     const next = !tools[id];
 
     setTools((previous) => ({ ...previous, [id]: next }));
-    notify(`${label}已${next ? '开启' : '关闭'}；时间线交互将在 T17 接入。`);
+    notify(`${label}已${next ? '开启' : '关闭'}。`);
   };
 
   const selectClip = (clip: TimelineTrackClip) => {
@@ -767,10 +821,37 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     };
   }, []);
 
-  const clipStyle = (clip: TimelineTrackClip) => ({
-    left: `${secondsToPercent(clip.startSeconds, spanSeconds)}%`,
-    width: `${secondsToPercent(clip.endSeconds - clip.startSeconds, spanSeconds)}%`,
-  });
+  const clipStyle = (clip: TimelineTrackClip) => {
+    const startPercent = secondsToPercent(clip.startSeconds, spanSeconds);
+    const widthPercent = secondsToPercent(clip.endSeconds - clip.startSeconds, spanSeconds);
+    const drag = clipDrag?.clipId === clip.id ? clipDrag : null;
+
+    if (!drag || spanSeconds <= 0) {
+      return { left: `${startPercent}%`, width: `${widthPercent}%` };
+    }
+
+    // 拖动过程中只做视觉预览，松手后才提交一次可撤销的编辑。
+    const deltaPercent = (drag.deltaMs / 1_000 / spanSeconds) * 100;
+
+    if (drag.mode === 'move') {
+      return {
+        left: `${startPercent + deltaPercent}%`,
+        width: `${widthPercent}%`,
+      };
+    }
+
+    if (drag.mode === 'trim-start') {
+      return {
+        left: `${startPercent + deltaPercent}%`,
+        width: `${Math.max(0, widthPercent - deltaPercent)}%`,
+      };
+    }
+
+    return {
+      left: `${startPercent}%`,
+      width: `${Math.max(0, widthPercent + deltaPercent)}%`,
+    };
+  };
 
   const clipPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     // 片段点击只负责选中，不触发轨道空白处的 seek / 拖动播放头。
@@ -943,12 +1024,286 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   };
 
   const splitAtPlayhead = () => {
-    pause();
     performEdit({ atMs: Math.round(currentTime * 1_000), type: 'split-video' });
   };
 
+  const resetClipDrag = useCallback(() => {
+    clipDragRef.current = null;
+    setClipDrag(null);
+  }, []);
+
+  /**
+   * 字幕/音乐片段的拖动：`move` 整体平移，`trim-start`/`trim-end` 拖左右边缘。
+   * 拖动中只更新视觉预览，松手时才提交一次编辑，保证撤销栈里只有一个步骤。
+   */
+  const beginClipDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    clip: TimelineTrackClip,
+    mode: ClipDragMode,
+  ) => {
+    event.stopPropagation();
+
+    if (session.readonly || event.button !== 0 || !event.isPrimary) {
+      return;
+    }
+
+    if (clip.kind !== 'subtitle' && clip.kind !== 'music') {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    selectClip(clip);
+    clipDragRef.current = {
+      clipId: clip.id,
+      deltaMs: 0,
+      kind: clip.kind,
+      mode,
+      originClientX: event.clientX,
+      pointerId: event.pointerId,
+    };
+    setClipDrag({ clipId: clip.id, deltaMs: 0, kind: clip.kind, mode });
+  };
+
+  const moveClipDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = clipDragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const rect = rulerTrackRef.current?.getBoundingClientRect();
+
+    if (!rect || rect.width <= 0) {
+      return;
+    }
+
+    const deltaMs = Math.round(
+      ((event.clientX - drag.originClientX) / rect.width) * spanSeconds * 1_000,
+    );
+
+    drag.deltaMs = deltaMs;
+    setClipDrag({ clipId: drag.clipId, deltaMs, kind: drag.kind, mode: drag.mode });
+  };
+
+  const endClipDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = clipDragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    resetClipDrag();
+
+    if (drag.deltaMs === 0) {
+      return;
+    }
+
+    suppressClickRef.current = true;
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 0);
+
+    if (drag.mode === 'move') {
+      performEdit({
+        clipId: drag.clipId,
+        deltaMs: drag.deltaMs,
+        type: drag.kind === 'music' ? 'move-music-clip' : 'move-subtitle-clip',
+      });
+      return;
+    }
+
+    performEdit({
+      clipId: drag.clipId,
+      deltaMs: drag.deltaMs,
+      edge: drag.mode === 'trim-start' ? 'start' : 'end',
+      type: drag.kind === 'music' ? 'trim-music-clip' : 'trim-subtitle-clip',
+    });
+  };
+
+  /** 按片段当前时间线/source 区间取真实峰值；未加载或失败时交给占位渲染。 */
+  const waveformForClip = (clip: TimelineTrackClip): ClipWaveformState => {
+    const asset = audioAssetsById.get(clip.assetId);
+
+    if (!asset) {
+      return { bars: null, state: 'failed' };
+    }
+
+    const peaks = waveforms.get(clip.assetId);
+
+    if (peaks === undefined) {
+      return { bars: null, state: 'loading' };
+    }
+
+    if (peaks === null) {
+      return { bars: null, state: 'failed' };
+    }
+
+    const startMs = Math.round(clip.startSeconds * 1_000);
+    const endMs = Math.round(clip.endSeconds * 1_000);
+    const values =
+      clip.kind === 'music'
+        ? sampleMusicWaveform(peaks, asset.durationMs, {
+            endMs,
+            loop: clip.loop ?? false,
+            sourceEndMs: clip.sourceEndMs ?? asset.durationMs,
+            sourceStartMs: clip.sourceStartMs ?? 0,
+            startMs,
+          })
+        : sampleVoiceWaveform(peaks, asset.durationMs, { endMs, startMs });
+
+    return { bars: waveformBars(values), state: 'ready' };
+  };
+
+  const deleteSelectedClip = useCallback(() => {
+    const selected = selection.clip;
+
+    if (session.readonly) {
+      notify('编辑器只读，无法删除片段。');
+      return;
+    }
+
+    if (!selected) {
+      notify('先在时间线上选中要删除的片段。');
+      return;
+    }
+
+    if (selected.kind !== 'subtitle' && selected.kind !== 'music') {
+      notify('视频和配音跟随分镜，不能单独删除。');
+      return;
+    }
+
+    performEdit({
+      clipId: selected.id,
+      type: selected.kind === 'music' ? 'delete-music-clip' : 'delete-subtitle-clip',
+    });
+
+    if (selection.sceneId) {
+      dispatch({ sceneId: selection.sceneId, type: 'select-scene' });
+    }
+  }, [notify, performEdit, selection.clip, selection.sceneId, session.readonly]);
+
+  const splitSelectedMusic = useCallback(() => {
+    const selected = selection.clip;
+
+    if (session.readonly) {
+      notify('编辑器只读，无法分割片段。');
+      return;
+    }
+
+    if (!selected || selected.kind !== 'music') {
+      notify('先在时间线上选中一段音乐，再在播放头处分割。');
+      return;
+    }
+
+    pause();
+    performEdit({
+      atMs: Math.round(currentTime * 1_000),
+      clipId: selected.id,
+      type: 'split-music-clip',
+    });
+  }, [currentTime, notify, pause, performEdit, selection.clip, session.readonly]);
+
+  const canEditSelectedClip =
+    !session.readonly && (selection.clip?.kind === 'subtitle' || selection.clip?.kind === 'music');
+
+  /**
+   * Delete / Backspace 的统一路由：字幕、音乐走各自的删除动作；
+   * 视频/配音走通用 `delete-clip`（编辑管线会拒绝）；没有选中片段时删除当前分镜。
+   */
+  const deleteSelection = useCallback(() => {
+    const selected = selection.clip;
+
+    if (!selected) {
+      if (!selection.sceneId || session.readonly) {
+        return;
+      }
+
+      performEdit({ sceneId: selection.sceneId, type: 'remove-scene' });
+      return;
+    }
+
+    if (session.readonly) {
+      notify('编辑器只读，无法删除片段。');
+      return;
+    }
+
+    if (selected.kind === 'subtitle' || selected.kind === 'music') {
+      deleteSelectedClip();
+      return;
+    }
+
+    performEdit({ clipId: selected.id, type: 'delete-clip' });
+  }, [
+    deleteSelectedClip,
+    notify,
+    performEdit,
+    selection.clip,
+    selection.sceneId,
+    session.readonly,
+  ]);
+
+  // Delete / Backspace 删除选中的片段或分镜；输入框内不拦截。
+  useEffect(() => {
+    const handleDeleteKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+
+      if (event.key !== 'Delete' && event.key !== 'Backspace') {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+
+      if (target?.closest('input, textarea, [contenteditable="true"]')) {
+        return;
+      }
+
+      event.preventDefault();
+      deleteSelection();
+    };
+
+    window.addEventListener('keydown', handleDeleteKey);
+
+    return () => {
+      window.removeEventListener('keydown', handleDeleteKey);
+    };
+  }, [deleteSelection]);
+
   const dropIndicatorSeconds =
     dropIndex === null ? null : (view.scenes[dropIndex]?.startSeconds ?? spanSeconds);
+
+  /** 左右裁剪手柄：只读时隐藏；指针事件由片段拖动状态机处理。 */
+  const renderTrimHandles = (clip: TimelineTrackClip, label: string) => {
+    if (session.readonly) {
+      return null;
+    }
+
+    return (
+      <>
+        <span
+          aria-hidden="true"
+          className="ed-trim-handle ed-trim-start"
+          title={`拖动裁剪${label}起点`}
+          onPointerCancel={resetClipDrag}
+          onPointerDown={(event) => beginClipDrag(event, clip, 'trim-start')}
+          onPointerMove={moveClipDrag}
+          onPointerUp={endClipDrag}
+        />
+        <span
+          aria-hidden="true"
+          className="ed-trim-handle ed-trim-end"
+          title={`拖动裁剪${label}终点`}
+          onPointerCancel={resetClipDrag}
+          onPointerDown={(event) => beginClipDrag(event, clip, 'trim-end')}
+          onPointerMove={moveClipDrag}
+          onPointerUp={endClipDrag}
+        />
+      </>
+    );
+  };
 
   const renderTrackClip = (track: EditorTrackView, clip: TimelineTrackClip, index: number) => {
     const selected = isClipSelected(clip);
@@ -1033,38 +1388,55 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
         >
           <span className="ed-voice-name">{clip.label}</span>
           {clip.badge ? <span className="ed-clip-badge">{clip.badge}</span> : null}
-          <WaveformPlaceholder />
+          {tools.wave ? <ClipWaveform {...waveformForClip(clip)} /> : null}
         </button>
       );
     }
 
     if (track.kind === 'subtitle') {
       return (
-        <button
-          key={clip.id}
-          {...shared}
-          className={`ed-timeline-clip ed-subtitle-bar${activeClass}`}
-          title={clip.text ?? clip.label}
-        >
-          <EditorIcon name="subtitles" size={16} />
-          <span className="ed-subtitle-text">{clip.text ?? clip.label}</span>
-        </button>
+        <div key={clip.id} className={`ed-clip-slot${activeClass}`} style={clipStyle(clip)}>
+          <button
+            aria-pressed={selected}
+            className={`ed-timeline-clip ed-subtitle-bar${activeClass}`}
+            onClick={() => handleClipClick(clip)}
+            onPointerCancel={resetClipDrag}
+            onPointerDown={(event) => beginClipDrag(event, clip, 'move')}
+            onPointerMove={moveClipDrag}
+            onPointerUp={endClipDrag}
+            title={clip.text ?? clip.label}
+            type="button"
+          >
+            <EditorIcon name="subtitles" size={16} />
+            <span className="ed-subtitle-text">{clip.text ?? clip.label}</span>
+          </button>
+          {renderTrimHandles(clip, '字幕')}
+        </div>
       );
     }
 
     return (
-      <button
-        key={clip.id}
-        {...shared}
-        className={`ed-timeline-clip ed-tl-music-bar${activeClass}`}
-        title={clip.label}
-      >
-        <span className="ed-bar-accent" style={{ background: 'var(--ed-blue)' }} />
-        <EditorIcon name="music" size={15} />
-        <span className="ed-tl-music-name">{clip.label}</span>
-        {clip.artist ? <span className="ed-tl-music-artist">{clip.artist}</span> : null}
-        <WaveformPlaceholder />
-      </button>
+      <div key={clip.id} className={`ed-clip-slot${activeClass}`} style={clipStyle(clip)}>
+        <button
+          aria-pressed={selected}
+          className={`ed-timeline-clip ed-tl-music-bar${activeClass}`}
+          onClick={() => handleClipClick(clip)}
+          onPointerCancel={resetClipDrag}
+          onPointerDown={(event) => beginClipDrag(event, clip, 'move')}
+          onPointerMove={moveClipDrag}
+          onPointerUp={endClipDrag}
+          title={clip.label}
+          type="button"
+        >
+          <span className="ed-bar-accent" style={{ background: 'var(--ed-blue)' }} />
+          <EditorIcon name="music" size={15} />
+          <span className="ed-tl-music-name">{clip.label}</span>
+          {clip.loop ? <span className="ed-clip-badge">循环</span> : null}
+          {clip.artist ? <span className="ed-tl-music-artist">{clip.artist}</span> : null}
+          {tools.wave ? <ClipWaveform {...waveformForClip(clip)} /> : null}
+        </button>
+        {renderTrimHandles(clip, '音乐')}
+      </div>
     );
   };
 
@@ -1436,9 +1808,33 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
               className="ed-icon-button"
               type="button"
               aria-label="分割"
+              title="在播放头处分割视频片段"
+              disabled={session.readonly}
               onClick={splitAtPlayhead}
             >
               <EditorIcon name="split" size={15} />
+            </button>
+
+            <button
+              className="ed-icon-button"
+              type="button"
+              aria-label="在播放头处分割音乐"
+              title="在播放头处分割选中的音乐片段"
+              disabled={session.readonly}
+              onClick={splitSelectedMusic}
+            >
+              <EditorIcon name="split" size={15} />
+            </button>
+
+            <button
+              className="ed-icon-button"
+              type="button"
+              aria-label="删除选中的字幕或音乐片段"
+              title="删除选中的字幕或音乐片段（Delete）"
+              disabled={!canEditSelectedClip}
+              onClick={deleteSelectedClip}
+            >
+              <EditorIcon name="trash" size={15} />
             </button>
 
             {TIMELINE_TOOLS.map((tool) => (

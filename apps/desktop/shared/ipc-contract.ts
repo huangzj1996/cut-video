@@ -47,6 +47,18 @@ export interface MediaInfo {
   ffprobeExists: boolean;
 }
 
+export interface MediaReadAudioInput {
+  assetId: string;
+  projectId: string;
+}
+
+/** 波形解码所需的音频字节；base64 避免 contextBridge 传递类型化数组的兼容问题。 */
+export interface MediaReadAudioResult {
+  assetId: string;
+  base64: string;
+  mimeType: string;
+}
+
 export interface ProjectSummary {
   contentRevision: number;
   createdAt: string;
@@ -185,6 +197,9 @@ export type IpcErrorCode =
   | 'ASSET_PROBE_UNAVAILABLE'
   | 'ASSET_KEYFRAME_UNAVAILABLE'
   | 'ASSET_MANIFEST_WRITE_FAILED'
+  | 'MEDIA_AUDIO_NOT_FOUND'
+  | 'MEDIA_AUDIO_TOO_LARGE'
+  | 'MEDIA_AUDIO_READ_FAILED'
   | 'LLM_INVALID_ARGUMENT'
   | 'LLM_NOT_CONFIGURED'
   | 'LLM_REQUEST_FAILED'
@@ -236,6 +251,10 @@ export interface IpcInvokeContract {
   'media:get-info': {
     params: [];
     result: MediaInfo;
+  };
+  'media:read-audio': {
+    params: [input: MediaReadAudioInput];
+    result: MediaReadAudioResult;
   };
   'project:list': {
     params: [];
@@ -324,6 +343,7 @@ export const IPC_CHANNELS = {
   },
   media: {
     getInfo: 'media:get-info' satisfies IpcChannel,
+    readAudio: 'media:read-audio' satisfies IpcChannel,
   },
   project: {
     create: 'project:create' satisfies IpcChannel,
@@ -373,6 +393,10 @@ export interface MiaomaLlmApi {
   chat(messages: LlmChatMessage[]): Promise<IpcResponse<IpcResult<'llm:chat'>>>;
 }
 
+export interface MiaomaMediaApi {
+  readAudio(input: MediaReadAudioInput): Promise<IpcResponse<IpcResult<'media:read-audio'>>>;
+}
+
 export interface MiaomaChatApi {
   list(projectId: string): Promise<IpcResponse<IpcResult<'chat:list'>>>;
   start(projectId: string): Promise<IpcResponse<IpcResult<'chat:start'>>>;
@@ -403,6 +427,7 @@ export interface MiaomaApi {
   getAppInfo(): Promise<IpcResponse<IpcResult<'app:get-info'>>>;
   getSettings(): Promise<IpcResponse<IpcResult<'settings:get'>>>;
   getMediaInfo(): Promise<IpcResponse<IpcResult<'media:get-info'>>>;
+  media: MiaomaMediaApi;
   project: MiaomaProjectApi;
   llm: MiaomaLlmApi;
   chat: MiaomaChatApi;

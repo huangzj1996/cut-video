@@ -44,6 +44,13 @@ describe('IPC channel contract', () => {
     expect(Object.values(IPC_CHANNELS.editor).sort()).toEqual(['editor:flush-complete']);
   });
 
+  it('registers the media channels used for waveform decoding', () => {
+    expect(Object.values(IPC_CHANNELS.media).sort()).toEqual([
+      'media:get-info',
+      'media:read-audio',
+    ]);
+  });
+
   it('registers unique push event channels that do not collide with invoke channels', () => {
     expect(eventChannels.sort()).toEqual([
       'chat:message',

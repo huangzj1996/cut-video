@@ -167,7 +167,10 @@ export function resolveVoiceSourceSeconds(
  * 音乐片段可以裁剪 source 区间并循环。循环时按区间长度取模，
  * 因此工程时间与音频 source 时间始终一一对应。
  */
-export function resolveMusicSourceSeconds(clip: MusicClip, timelineSeconds: number): number {
+export function resolveMusicSourceSeconds(
+  clip: Pick<MusicClip, 'loop' | 'sourceEndMs' | 'sourceStartMs' | 'startMs'>,
+  timelineSeconds: number,
+): number {
   const elapsedMs = Math.max(0, timelineSeconds * 1_000 - clip.startMs);
   const sourceSpanMs = Math.max(1, clip.sourceEndMs - clip.sourceStartMs);
 

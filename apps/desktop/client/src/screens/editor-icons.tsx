@@ -14,6 +14,7 @@ export type EditorIconName =
   | 'undo'
   | 'redo'
   | 'split'
+  | 'trash'
   | 'magnet'
   | 'link'
   | 'wave'
@@ -123,6 +124,15 @@ const ICON_NODES: Record<EditorIconName, ReactNode> = {
       <circle cx="6" cy="17" r="2.5" />
       <path d="M8 8.5 20 17" />
       <path d="M8 15.5 20 7" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M9 7V5h6v2" />
+      <path d="M6 7l1 13h10l1-13" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
     </>
   ),
   magnet: (

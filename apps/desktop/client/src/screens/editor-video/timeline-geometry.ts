@@ -27,12 +27,18 @@ export interface TimelineTick {
 
 export interface TimelineTrackClip {
   artist?: string;
+  /** 媒体资源 id：波形按它从工程资产里取解码后的峰值。 */
+  assetId: string;
   badge?: string;
   endSeconds: number;
   id: string;
   kind: EditorTrackKind;
   label: string;
+  loop?: boolean;
   sceneId?: string;
+  /** 音乐 source 区间（毫秒）；配音/字幕没有裁剪过的 source 区间。 */
+  sourceEndMs?: number;
+  sourceStartMs?: number;
   startSeconds: number;
   text?: string;
   thumbnailIds?: string[];
@@ -137,6 +143,7 @@ function buildVideoClips(project: VideoProject, scenesById: Map<string, Scene>) 
     const thumbnailIds = (asset?.thumbnailIds ?? []).filter((id) => registeredThumbnails.has(id));
 
     return {
+      assetId: clip.assetId,
       endSeconds: seconds(clip.endMs),
       id: clip.id,
       kind: 'video',
@@ -157,6 +164,7 @@ function buildVoiceClips(project: VideoProject, scenesById: Map<string, Scene>) 
     const asset = assetsById.get(clip.assetId);
 
     return {
+      assetId: clip.assetId,
       endSeconds: seconds(clip.endMs),
       id: clip.id,
       kind: 'voice',
@@ -172,6 +180,7 @@ function buildSubtitleClips(project: VideoProject) {
   const track = findTrack(project, 'subtitle');
 
   return byStart<SubtitleClip>(track?.clips ?? []).map((clip): TimelineTrackClip => ({
+    assetId: clip.assetId,
     endSeconds: seconds(clip.endMs),
     id: clip.id,
     kind: 'subtitle',
@@ -190,10 +199,14 @@ function buildMusicClips(project: VideoProject) {
     const asset = assetsById.get(clip.assetId);
 
     return {
+      assetId: clip.assetId,
       endSeconds: seconds(clip.endMs),
       id: clip.id,
       kind: 'music',
       label: asset?.title ?? '音乐',
+      loop: clip.loop ?? false,
+      sourceEndMs: clip.sourceEndMs,
+      sourceStartMs: clip.sourceStartMs,
       startSeconds: seconds(clip.startMs),
       ...(asset?.artist ? { artist: asset.artist } : {}),
     };

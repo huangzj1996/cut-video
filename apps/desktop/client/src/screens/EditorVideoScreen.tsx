@@ -32,6 +32,7 @@ import { buildPreviewMediaPlan, trackHasClips } from './editor-video/preview-med
 import type { EditAction } from './editor-video/project-edit';
 import { reorderTargetIndex } from './editor-video/reorder-drag';
 import { createSelection, selectionReducer } from './editor-video/selection';
+import { resolveSubtitleOverlay } from './editor-video/subtitle-overlay';
 import {
   buildEditorTimeline,
   sliderFromZoom,
@@ -280,6 +281,10 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   const playheadRatio = Math.min(1, Math.max(0, currentTime / spanSeconds));
   const previewPlan = useMemo(
     () => buildPreviewMediaPlan(session.project, currentTime),
+    [currentTime, session.project],
+  );
+  const subtitleOverlay = useMemo(
+    () => resolveSubtitleOverlay(session.project, currentTime),
     [currentTime, session.project],
   );
   const hasVoiceTrack = useMemo(() => trackHasClips(session.project, 'voice'), [session.project]);
@@ -1018,6 +1023,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
             playing={playing}
             projectId={view.projectId}
             stageRef={stageRef}
+            subtitle={subtitleOverlay}
           />
           <div className="ed-preview-bar">
             {timecodeEditing ? (

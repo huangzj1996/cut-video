@@ -1425,11 +1425,11 @@
   transition: opacity 120ms ease;
 }
 
-.ed-trim-handle.is-start {
+.ed-trim-handle.ed-trim-start {
   left: 0;
 }
 
-.ed-trim-handle.is-end {
+.ed-trim-handle.ed-trim-end {
   right: 0;
 }
 

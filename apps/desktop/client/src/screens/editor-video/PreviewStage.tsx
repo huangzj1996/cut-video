@@ -32,13 +32,13 @@ import {
 
 interface PreviewStageProps {
   currentTime: number;
-  musicTrackActive: boolean;
+  hasMusicTrack: boolean;
+  hasVoiceTrack: boolean;
   muted: boolean;
   plan: PreviewMediaPlan;
   playing: boolean;
   projectId: string;
   stageRef: RefObject<HTMLDivElement | null>;
-  voiceTrackActive: boolean;
 }
 
 function videoPlanOf(plan: PreviewVideoPlan | null): PreviewVideoPlan | null {
@@ -121,6 +121,7 @@ function applySlotSource(
   }
 }
 
+/** 对齐并播放音频元素；返回值表示 source 是否刚被重新加载（用于清掉旧错误）。 */
 function syncAudioElement(
   element: HTMLAudioElement | null,
   plan: PreviewAudioPlan | null,
@@ -163,13 +164,13 @@ function syncAudioElement(
 
 export function PreviewStage({
   currentTime,
-  musicTrackActive,
+  hasMusicTrack,
+  hasVoiceTrack,
   muted,
   plan,
   playing,
   projectId,
   stageRef,
-  voiceTrackActive,
 }: PreviewStageProps) {
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
@@ -222,30 +223,30 @@ export function PreviewStage({
       const isActive =
         slots.active === key && videoPlan !== null && slot.assetId === videoPlan.assetId;
 
-      if (!isActive || !slot.ready) {
-        // 预加载槽位先停在下一片段的 source 起点，切镜时无需再 seek。
-        if (!isActive && slot.ready && nextVideoPlan && slot.assetId === nextVideoPlan.assetId) {
-          element.playbackRate = nextVideoPlan.playbackRate;
-
-          if (needsDriftCorrection(nextVideoPlan.sourceSeconds, element.currentTime)) {
-            seekMediaElement(element, nextVideoPlan.sourceSeconds);
-          }
-        }
-
-        pauseMediaElement(element);
+      if (isActive && slot.ready) {
+        element.playbackRate = videoPlan.playbackRate;
+        alignMediaElement(element, videoPlan.sourceSeconds, playing);
         continue;
       }
 
-      element.playbackRate = videoPlan.playbackRate;
-      alignMediaElement(element, videoPlan.sourceSeconds, playing);
+      // 预加载槽位先停在下一片段的 source 起点，切镜时无需再 seek。
+      if (slot.ready && nextVideoPlan && slot.assetId === nextVideoPlan.assetId) {
+        element.playbackRate = nextVideoPlan.playbackRate;
+
+        if (needsDriftCorrection(nextVideoPlan.sourceSeconds, element.currentTime)) {
+          seekMediaElement(element, nextVideoPlan.sourceSeconds);
+        }
+      }
+
+      pauseMediaElement(element);
     }
   }, [plan, playing, slots]);
 
   useEffect(() => {
-    const voiceChanged = syncAudioElement(voiceRef.current, plan.voice, projectId, muted, playing);
-    const musicChanged = syncAudioElement(musicRef.current, plan.music, projectId, muted, playing);
+    const voiceReloaded = syncAudioElement(voiceRef.current, plan.voice, projectId, muted, playing);
+    const musicReloaded = syncAudioElement(musicRef.current, plan.music, projectId, muted, playing);
 
-    if (voiceChanged || musicChanged) {
+    if (voiceReloaded || musicReloaded) {
       setAudioError(null);
     }
   }, [muted, plan, playing, projectId]);
@@ -260,14 +261,17 @@ export function PreviewStage({
     updateSlots((previous) => markSlotReady(previous, key));
   };
 
-  const handleVideoError = (key: VideoSlotKey, element: HTMLVideoElement | null) => {
-    const message = describeMediaElementError(element?.error);
+  const handleVideoError = (key: VideoSlotKey) => {
+    const message = describeMediaElementError(videoRefs[key].current?.error);
 
     updateSlots((previous) => markSlotFailed(previous, key, message));
   };
 
-  const syncAudioMetadata = (element: HTMLAudioElement, audioPlan: PreviewAudioPlan | null) => {
-    if (!audioPlan || !seekMediaElement(element, audioPlan.sourceSeconds)) {
+  const syncAudioMetadata = (
+    element: HTMLAudioElement | null,
+    audioPlan: PreviewAudioPlan | null,
+  ) => {
+    if (!element || !audioPlan || !seekMediaElement(element, audioPlan.sourceSeconds)) {
       return;
     }
 
@@ -280,7 +284,11 @@ export function PreviewStage({
     }
   };
 
-  const handleMusicEnded = (element: HTMLAudioElement) => {
+  const handleMusicEnded = (element: HTMLAudioElement | null) => {
+    if (!element) {
+      return;
+    }
+
     const musicPlan = planRef.current.music;
 
     if (!musicPlan || !musicPlan.loop || element.dataset.assetId !== musicPlan.assetId) {
@@ -299,11 +307,11 @@ export function PreviewStage({
     }
   };
 
-  const visible = visibleSlot(slots);
+  const visibleKey = visibleSlot(slots);
   const activeSlot = slots.active ? slots.slots[slots.active] : null;
   const activeError = activeSlot?.error ?? null;
   const imagePlan = plan.video?.mediaType === 'image' ? plan.video : null;
-  const loading = !plan.videoIssue && !activeError && videoPlan !== null && visible === null;
+  const loading = !plan.videoIssue && !activeError && videoPlan !== null && visibleKey === null;
   const empty = plan.video === null && plan.videoIssue === null;
 
   return (
@@ -321,12 +329,12 @@ export function PreviewStage({
           key={key}
           ref={videoRefs[key]}
           aria-hidden="true"
-          className={`ed-preview-video${visible === key ? ' is-visible' : ''}`}
+          className={`ed-preview-video${visibleKey === key ? ' is-visible' : ''}`}
           muted
           playsInline
           preload="auto"
           tabIndex={-1}
-          onError={() => handleVideoError(key, videoRefs[key].current)}
+          onError={() => handleVideoError(key)}
           onLoadedData={() => handleVideoReady(key)}
         />
       ))}
@@ -368,36 +376,24 @@ export function PreviewStage({
         </div>
       ) : null}
 
-      {voiceTrackActive ? (
+      {hasVoiceTrack ? (
         <audio
           ref={voiceRef}
           className="ed-preview-audio"
           preload="auto"
           onError={() => setAudioError(describeMediaElementError(voiceRef.current?.error))}
-          onLoadedMetadata={() => {
-            if (voiceRef.current) {
-              syncAudioMetadata(voiceRef.current, planRef.current.voice);
-            }
-          }}
+          onLoadedMetadata={() => syncAudioMetadata(voiceRef.current, planRef.current.voice)}
         />
       ) : null}
 
-      {musicTrackActive ? (
+      {hasMusicTrack ? (
         <audio
           ref={musicRef}
           className="ed-preview-audio"
           preload="auto"
-          onEnded={() => {
-            if (musicRef.current) {
-              handleMusicEnded(musicRef.current);
-            }
-          }}
+          onEnded={() => handleMusicEnded(musicRef.current)}
           onError={() => setAudioError(describeMediaElementError(musicRef.current?.error))}
-          onLoadedMetadata={() => {
-            if (musicRef.current) {
-              syncAudioMetadata(musicRef.current, planRef.current.music);
-            }
-          }}
+          onLoadedMetadata={() => syncAudioMetadata(musicRef.current, planRef.current.music)}
         />
       ) : null}
     </div>

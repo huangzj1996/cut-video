@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import {
   advancePosition,
+  clampPosition,
   createAnchor,
   createPlaybackState,
   playbackReducer,
   resolvePlayStart,
-  type PlaybackStatus,
 } from './playback';
 
 /** 画面状态按约 30fps 刷新即可；媒体同步依赖锚点，不受刷新率影响。 */
@@ -14,10 +14,8 @@ const RENDER_INTERVAL_MS = 33;
 export interface PlaybackClock {
   currentTime: number;
   pause: () => void;
-  play: () => void;
   playing: boolean;
   seek: (seconds: number) => void;
-  status: PlaybackStatus;
   toggle: () => void;
 }
 
@@ -36,7 +34,7 @@ export function usePlaybackClock(durationSeconds: number): PlaybackClock {
 
   const seek = useCallback((seconds: number) => {
     const duration = durationRef.current;
-    const position = Math.min(Math.max(0, seconds), duration);
+    const position = clampPosition(seconds, duration);
 
     anchorRef.current = createAnchor(position, performance.now());
     dispatch({ durationSeconds: duration, positionSeconds: position, type: 'seek' });
@@ -106,10 +104,8 @@ export function usePlaybackClock(durationSeconds: number): PlaybackClock {
   return {
     currentTime: state.positionSeconds,
     pause,
-    play,
     playing: state.status === 'playing',
     seek,
-    status: state.status,
     toggle,
   };
 }

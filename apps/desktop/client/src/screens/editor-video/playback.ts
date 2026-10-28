@@ -31,14 +31,12 @@ export interface PlaybackAnchor {
   positionSeconds: number;
 }
 
-function clampPosition(seconds: number, durationSeconds: number): number {
-  const upper = Math.max(0, durationSeconds);
-
+export function clampPosition(seconds: number, durationSeconds: number): number {
   if (!Number.isFinite(seconds)) {
     return 0;
   }
 
-  return Math.min(Math.max(0, seconds), upper);
+  return Math.min(Math.max(0, seconds), Math.max(0, durationSeconds));
 }
 
 export function createPlaybackState(): PlaybackState {

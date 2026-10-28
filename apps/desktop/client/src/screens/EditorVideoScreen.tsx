@@ -207,11 +207,11 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     () => buildPreviewMediaPlan(project, currentTime),
     [currentTime, project],
   );
-  const voiceTrackActive = useMemo(
+  const hasVoiceTrack = useMemo(
     () => project.tracks.some((track) => track.kind === 'voice' && track.clips.length > 0),
     [project],
   );
-  const musicTrackActive = useMemo(
+  const hasMusicTrack = useMemo(
     () => project.tracks.some((track) => track.kind === 'music' && track.clips.length > 0),
     [project],
   );
@@ -620,13 +620,13 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
         <section className="ed-center" aria-label="视频预览">
           <PreviewStage
             currentTime={currentTime}
-            musicTrackActive={musicTrackActive}
+            hasMusicTrack={hasMusicTrack}
+            hasVoiceTrack={hasVoiceTrack}
             muted={muted}
             plan={previewPlan}
             playing={playing}
             projectId={view.projectId}
             stageRef={stageRef}
-            voiceTrackActive={voiceTrackActive}
           />
           <div className="ed-preview-bar">
             {timecodeEditing ? (

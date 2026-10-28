@@ -309,11 +309,11 @@ describe('buildPreviewMediaPlan video', () => {
 });
 
 describe('describeVideoIssue', () => {
-  const [h264, , hevc, hdr, vfr, webm] = makeProject().assets.videos;
+  const [h264, mov, hevc, hdr, vfr, webm] = makeProject().assets.videos;
 
   it('plays H.264 MP4/MOV directly', () => {
     expect(describeVideoIssue(h264!)).toBeNull();
-    expect(describeVideoIssue(makeProject().assets.videos[1]!)).toBeNull();
+    expect(describeVideoIssue(mov!)).toBeNull();
   });
 
   it('explains unsupported codecs, HDR, VFR, and containers', () => {

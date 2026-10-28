@@ -134,7 +134,7 @@ export function syncVideoSlots(
     if (next) {
       const key = pickIdleSlot(result, next);
 
-      result = withSlot(result, key, assign(result.slots[key], next), null);
+      result = withSlot(result, key, assign(result.slots[key], next));
     }
 
     return result;

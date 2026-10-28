@@ -15,6 +15,7 @@ import type {
 
 const PLAYABLE_VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4']);
 const PLAYABLE_VIDEO_CODECS = new Set(['avc', 'avc1', 'h264']);
+const PLAYABLE_FORMAT_HINT = '目前仅支持 H.264/AAC 的 MP4/MOV。';
 /** 停在 source 末尾时回退一点：避免 video seek 到 duration 变黑，也给音频留出判停余量。 */
 const SOURCE_END_GUARD_SECONDS = 0.001;
 
@@ -188,7 +189,7 @@ export function describeVideoIssue(asset: VideoAsset): PreviewIssue | null {
     return {
       assetId: asset.id,
       kind: 'unsupported-container',
-      message: `不支持的视频容器：${extension || '未知'}。目前仅支持 H.264/AAC 的 MP4/MOV。`,
+      message: `不支持的视频容器：${extension || '未知'}。${PLAYABLE_FORMAT_HINT}`,
     };
   }
 
@@ -198,7 +199,7 @@ export function describeVideoIssue(asset: VideoAsset): PreviewIssue | null {
     return {
       assetId: asset.id,
       kind: 'unsupported-codec',
-      message: `不支持的视频编码：${asset.codec}。目前仅支持 H.264/AAC 的 MP4/MOV。`,
+      message: `不支持的视频编码：${asset.codec}。${PLAYABLE_FORMAT_HINT}`,
     };
   }
 

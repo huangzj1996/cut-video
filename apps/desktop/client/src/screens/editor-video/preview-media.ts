@@ -102,6 +102,15 @@ function sortedByStart<T extends ClippedMs>(clips: readonly T[]): T[] {
 }
 
 /**
+ * 片段边界以毫秒表示，播放头的秒值必须先归一到毫秒再参与比较：
+ * JS 中 `1.009 * 1_000 === 1008.9999999999999`，直接比较会让相邻片段的
+ * 共享边界（如 1009ms）落到前一个片段上。
+ */
+function toTimelineMs(seconds: number): number {
+  return Math.round(seconds * 1_000);
+}
+
+/**
  * 查找播放头所在的片段。时间恰好停在工程末尾时保留最后一帧；
  * 超过末尾则返回 undefined。
  */
@@ -113,7 +122,7 @@ export function findClipAtSeconds<T extends ClippedMs>(
     return undefined;
   }
 
-  const timeMs = timeSeconds * 1_000;
+  const timeMs = toTimelineMs(timeSeconds);
 
   for (const clip of clips) {
     if (timeMs >= clip.startMs && timeMs < clip.endMs) {

@@ -10,7 +10,8 @@ import type {
  * 编辑器编辑纯函数（主接缝）。
  *
  * 时间线采用"分镜锁定"模型：视频轨以分镜为原子块，块与块首尾相接；
- * 拖动视频块即移动整个分镜，视频、配音、字幕片段一起平移。
+ * 拖动视频块即移动整个分镜，视频、配音、字幕片段一起平移。分镜时长只能
+ * 通过末尾视频片段的右边缘裁剪改变，分割只在分镜内部产生 source 连续的片段。
  * 每次编辑后重新校验时间线不变量，破坏不变量时整次编辑被拒绝。
  */
 
@@ -350,6 +351,22 @@ function reject(code: EditRejectionCode, message: string): EditResult {
   return { code, message, ok: false };
 }
 
+/** 每次编辑后统一校验时间线不变量；返回 null 表示文档可以提交。 */
+function rejectOnInvariantViolation(nextProject: VideoProject): EditResult | null {
+  const violations = findInvariantViolations(nextProject);
+
+  if (violations.length === 0) {
+    return null;
+  }
+
+  const [first] = violations;
+
+  return reject(
+    'EDIT_INVARIANT_VIOLATION',
+    `编辑会破坏时间线：${first?.message ?? '未知不变量'}。`,
+  );
+}
+
 /** 分镜顺序不变、只有时长变化时，把片段按所属分镜的新起点平移。 */
 function rebaseSceneBoundClips<T extends SceneBoundClip>(
   clips: readonly T[],
@@ -474,15 +491,10 @@ function trimVideoClip(project: VideoProject, clipId: string, deltaMs: number): 
       }
     }),
   };
-  const violations = findInvariantViolations(nextProject);
+  const violation = rejectOnInvariantViolation(nextProject);
 
-  if (violations.length > 0) {
-    const [first] = violations;
-
-    return reject(
-      'EDIT_INVARIANT_VIOLATION',
-      `编辑会破坏时间线：${first?.message ?? '未知不变量'}。`,
-    );
+  if (violation) {
+    return violation;
   }
 
   return { changed: true, ok: true, project: nextProject };
@@ -551,15 +563,10 @@ function splitVideoClip(project: VideoProject, atMs: number): EditResult {
       track.kind === 'video' ? { ...track, clips: nextVideoClips } : track,
     ),
   };
-  const violations = findInvariantViolations(nextProject);
+  const violation = rejectOnInvariantViolation(nextProject);
 
-  if (violations.length > 0) {
-    const [firstViolation] = violations;
-
-    return reject(
-      'EDIT_INVARIANT_VIOLATION',
-      `编辑会破坏时间线：${firstViolation?.message ?? '未知不变量'}。`,
-    );
+  if (violation) {
+    return violation;
   }
 
   return { changed: true, ok: true, project: nextProject };
@@ -613,15 +620,10 @@ export function applyEdit(project: VideoProject, action: EditAction): EditResult
         scenes: nextScenes,
         tracks: reorderTracks(project, deltas),
       };
-      const violations = findInvariantViolations(nextProject);
+      const violation = rejectOnInvariantViolation(nextProject);
 
-      if (violations.length > 0) {
-        const [first] = violations;
-
-        return reject(
-          'EDIT_INVARIANT_VIOLATION',
-          `编辑会破坏时间线：${first?.message ?? '未知不变量'}。`,
-        );
+      if (violation) {
+        return violation;
       }
 
       return { changed: true, ok: true, project: nextProject };

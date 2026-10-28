@@ -18,8 +18,8 @@ function voiceClips(project: VideoProject): VoiceClip[] {
 }
 
 /**
- * 模拟编辑器延长分镜后的工程：分镜和视频片段一起变长，配音片段可选跟随。
- * `extendVoice=false` 时保留配音原长度，用于验证旧错误规则仍然生效。
+ * 模拟编辑器延长分镜后的工程：分镜和所有视频片段一起变长，
+ * 配音片段是否跟随到新结尾由调用方决定（不跟随时用于验证旧规则仍会失败）。
  */
 function extendFirstScene(project: VideoProject, durationMs: number): VideoProject {
   const next = structuredClone(project);

@@ -77,6 +77,22 @@ export function canRedoSession(state: EditorSessionState): boolean {
   return canEdit(state) && canRedo(state.history);
 }
 
+/** 文档发生变化（编辑/撤销/重做）：压入历史、标脏并重新进入待保存状态。 */
+function withHistory(
+  state: EditorSessionState,
+  nextHistory: History<VideoProject>,
+): EditorSessionState {
+  return {
+    ...state,
+    dirty: true,
+    editSeq: state.editSeq + 1,
+    history: nextHistory,
+    lastEditError: null,
+    project: nextHistory.present,
+    saveStatus: 'idle',
+  };
+}
+
 /** 工作流运行或等待审批时编辑器只读；其他状态可编辑。 */
 export function isEditorReadOnly(status: WorkflowRunStatus | null): boolean {
   return status === 'running' || status === 'waiting_user';
@@ -104,15 +120,7 @@ export function editorSessionReducer(
 
       const nextHistory = commitHistory(state.history, result.project);
 
-      return {
-        ...state,
-        dirty: true,
-        editSeq: state.editSeq + 1,
-        history: nextHistory,
-        lastEditError: null,
-        project: nextHistory.present,
-        saveStatus: 'idle',
-      };
+      return withHistory(state, nextHistory);
     }
 
     case 'undo': {
@@ -120,17 +128,7 @@ export function editorSessionReducer(
         return state;
       }
 
-      const nextHistory = undoHistory(state.history);
-
-      return {
-        ...state,
-        dirty: true,
-        editSeq: state.editSeq + 1,
-        history: nextHistory,
-        lastEditError: null,
-        project: nextHistory.present,
-        saveStatus: 'idle',
-      };
+      return withHistory(state, undoHistory(state.history));
     }
 
     case 'redo': {
@@ -138,17 +136,7 @@ export function editorSessionReducer(
         return state;
       }
 
-      const nextHistory = redoHistory(state.history);
-
-      return {
-        ...state,
-        dirty: true,
-        editSeq: state.editSeq + 1,
-        history: nextHistory,
-        lastEditError: null,
-        project: nextHistory.present,
-        saveStatus: 'idle',
-      };
+      return withHistory(state, redoHistory(state.history));
     }
 
     case 'save-start':

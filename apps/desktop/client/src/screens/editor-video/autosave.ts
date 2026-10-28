@@ -63,19 +63,9 @@ export class AutosaveController {
       return;
     }
 
+    // 每来一次编辑都重新计时防抖窗口；30s 上限只在第一次编辑时启动。
     this.clearDebounceTimer();
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null;
-      void this.runSave();
-    }, this.debounceMs);
-
-    if (this.maxWaitTimer === null) {
-      this.maxWaitTimer = setTimeout(() => {
-        this.maxWaitTimer = null;
-        this.clearDebounceTimer();
-        void this.runSave();
-      }, this.maxWaitMs);
-    }
+    this.scheduleNext();
   }
 
   /** Ctrl+S / 关闭窗口：立即保存，并等待保存完成。 */

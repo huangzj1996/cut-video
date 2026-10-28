@@ -25,17 +25,21 @@ const SAVE_STATUS_LABELS: Record<SaveStatusKind, string> = {
  * 优先级：冲突 > 保存中 > 保存失败 > 待保存 > 已保存。
  * 冲突必须压过其他状态，否则用户会以为还能覆盖别处的新修订。
  */
+function saveStatusKind(saveStatus: SaveStatus, dirty: boolean): SaveStatusKind {
+  switch (saveStatus) {
+    case 'conflict':
+      return 'conflict';
+    case 'saving':
+      return 'saving';
+    case 'error':
+      return 'error';
+    default:
+      return dirty ? 'dirty' : 'saved';
+  }
+}
+
 export function describeSaveStatus(saveStatus: SaveStatus, dirty: boolean): SaveStatusView {
-  const kind: SaveStatusKind =
-    saveStatus === 'conflict'
-      ? 'conflict'
-      : saveStatus === 'saving'
-        ? 'saving'
-        : saveStatus === 'error'
-          ? 'error'
-          : dirty
-            ? 'dirty'
-            : 'saved';
+  const kind = saveStatusKind(saveStatus, dirty);
 
   return { kind, label: SAVE_STATUS_LABELS[kind] };
 }

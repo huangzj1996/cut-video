@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import started from 'electron-squirrel-startup';
@@ -31,6 +31,7 @@ import { ChatStore } from './chat/chat-store';
 import { CloseFlushCoordinator } from './editor/close-flush';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { registerAssetProtocol, registerAssetScheme } from './media/asset-protocol-handler';
+import { planAudioSourceRead } from './media/audio-source';
 import { isBinaryAvailable } from './media/binary-check';
 import { resolveMediaBinary } from './media/ffmpeg-path';
 import { ProjectStore } from './projects/project-store';
@@ -256,6 +257,41 @@ function registerIpcHandlers(): void {
       return buildMediaInfo();
     } catch {
       throw new IpcError('MEDIA_INFO_FAILED', '媒体工具检测失败。', true);
+    }
+  });
+
+  // 波形需要音频字节：按工程白名单读取配音/音乐，只把 base64 交给渲染进程解码。
+  handle(IPC_CHANNELS.media.readAudio, (input) => {
+    const raw = input as { assetId?: unknown; projectId?: unknown } | undefined;
+    const projectId = assertProjectId(raw?.projectId);
+    const assetId = typeof raw?.assetId === 'string' ? raw.assetId : '';
+    const project = getProjectStore().get(projectId);
+    const plan = planAudioSourceRead({
+      assetId,
+      project,
+      stat: (filePath) => {
+        try {
+          const stat = statSync(filePath);
+
+          return { isFile: stat.isFile(), size: stat.size };
+        } catch {
+          return null;
+        }
+      },
+    });
+
+    if (!plan.ok) {
+      throw new IpcError(plan.code, plan.message, false);
+    }
+
+    try {
+      return {
+        assetId,
+        base64: readFileSync(plan.filePath).toString('base64'),
+        mimeType: plan.mimeType,
+      };
+    } catch {
+      throw new IpcError('MEDIA_AUDIO_READ_FAILED', '读取音频素材失败。', true);
     }
   });
 

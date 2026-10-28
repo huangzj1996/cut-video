@@ -327,6 +327,41 @@ describe('buildEditorTimeline', () => {
     });
   });
 
+  it('carries asset ids and the music loop source window for waveform rendering', () => {
+    const withMusic = buildEditorTimeline({
+      ...PROJECT,
+      tracks: PROJECT.tracks.map((track) =>
+        track.kind === 'music'
+          ? {
+              ...track,
+              clips: [
+                {
+                  assetId: 'music-1',
+                  endMs: 6_000,
+                  id: 'clip-music-1',
+                  kind: 'music' as const,
+                  loop: true,
+                  sourceEndMs: 6_000,
+                  sourceStartMs: 2_000,
+                  startMs: 0,
+                },
+              ],
+            }
+          : track,
+      ),
+    });
+
+    expect(withMusic.tracks[0]?.clips[0]?.assetId).toBe('video-1');
+    expect(withMusic.tracks[1]?.clips[0]?.assetId).toBe('voice-1');
+    expect(withMusic.tracks[2]?.clips[0]?.assetId).toBe('subtitle-1');
+    expect(withMusic.tracks[3]?.clips[0]).toMatchObject({
+      assetId: 'music-1',
+      loop: true,
+      sourceEndMs: 6_000,
+      sourceStartMs: 2_000,
+    });
+  });
+
   it('includes dynamic ruler ticks for the project duration', () => {
     expect(timeline.durationSeconds).toBe(10);
     expect(timeline.ticks.at(-1)).toEqual({ label: '00:10', seconds: 10 });

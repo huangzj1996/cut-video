@@ -1376,6 +1376,68 @@
   white-space: nowrap;
 }
 
+/* 真实波形：按片段宽度拉伸，静音时是一条居中的平线。 */
+.ed-wave {
+  flex: 1 1 48px;
+  min-width: 24px;
+  height: 22px;
+  overflow: hidden;
+  fill: rgba(255, 255, 255, 0.72);
+}
+
+.ed-voice-bar > .ed-wave,
+.ed-tl-music-bar > .ed-wave {
+  flex: 1 1 48px;
+}
+
+/* 可编辑片段（字幕/音乐）的外层盒子：承载位置与左右裁剪手柄。 */
+.ed-clip-slot {
+  position: absolute;
+  top: 50%;
+  height: 42px;
+  transform: translateY(-50%);
+}
+
+.ed-clip-slot > .ed-timeline-clip {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 100%;
+  transform: none;
+}
+
+.ed-clip-slot:hover > .ed-timeline-clip,
+.ed-clip-slot.is-active > .ed-timeline-clip {
+  filter: brightness(1.1);
+}
+
+.ed-trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 10px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.12));
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ed-trim-handle.is-start {
+  left: 0;
+}
+
+.ed-trim-handle.is-end {
+  right: 0;
+}
+
+.ed-clip-slot:hover .ed-trim-handle,
+.ed-clip-slot.is-active .ed-trim-handle {
+  opacity: 0.9;
+}
+
 .ed-track-empty {
   position: absolute;
   top: 50%;

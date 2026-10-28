@@ -71,7 +71,9 @@ export function findActiveSubtitleClip(
     return undefined;
   }
 
-  const timeMs = timelineSeconds * 1_000;
+  // 播放头是浮点秒，直接乘 1000 会落到 1008.999… 之类的值；
+  // 先归一化到整数毫秒，共享边界（如 1009ms）才会命中后一条字幕。
+  const timeMs = Math.round(timelineSeconds * 1_000);
 
   return track.clips
     .slice()

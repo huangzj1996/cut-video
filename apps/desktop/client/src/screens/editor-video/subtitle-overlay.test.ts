@@ -127,6 +127,42 @@ describe('resolveSubtitleOverlay', () => {
     expect(resolveSubtitleOverlay(project, 2)?.text).toBe('第二句');
   });
 
+  // 回归：1.009 * 1000 === 1008.999…，直接在浮点秒上乘 1000 比较会把共享边界判给前一条。
+  // 1009ms / 2009ms 来自真实工程（b0fca062、bfa260ea）的 cue 起点。
+  it('hits the next cue when adjacent cues share a 1009ms boundary at 1.009s', () => {
+    const project = makeProject({
+      clips: [
+        makeClip('cue-1', 0, 1_009, '城市美景。'),
+        makeClip('cue-2', 1_009, 3_009, '把目光放向城市，看看眼前的风景。'),
+      ],
+    });
+
+    expect(resolveSubtitleOverlay(project, 1.009)?.text).toBe('把目光放向城市，看看眼前的风景。');
+  });
+
+  it('does not keep the previous cue on its 1009ms end boundary at 1.009s', () => {
+    const project = makeProject({ clips: [makeClip('cue-1', 0, 1_009, '城市美景。')] });
+
+    expect(resolveSubtitleOverlay(project, 1.009)).toBeNull();
+  });
+
+  it('crosses a 2009ms shared boundary at 2.009s', () => {
+    const project = makeProject({
+      clips: [
+        makeClip('cue-1', 1_009, 2_009, '城市美景。'),
+        makeClip('cue-2', 2_009, 3_009, '把目光放向城市，看看眼前的风景。'),
+      ],
+    });
+
+    expect(resolveSubtitleOverlay(project, 2.009)?.text).toBe('把目光放向城市，看看眼前的风景。');
+  });
+
+  it('does not keep the previous cue on its 2009ms end boundary at 2.009s', () => {
+    const project = makeProject({ clips: [makeClip('cue-1', 1_009, 2_009, '城市美景。')] });
+
+    expect(resolveSubtitleOverlay(project, 2.009)).toBeNull();
+  });
+
   it('does not render while the subtitle track is hidden', () => {
     const project = makeProject({ visible: false });
 

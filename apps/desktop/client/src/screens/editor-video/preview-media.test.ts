@@ -441,6 +441,28 @@ describe('preview source mapping', () => {
     expect(findClipAtSeconds(videoTrack.clips, 10)?.id).toBe('clip-video-2');
     expect(findClipAtSeconds(videoTrack.clips, 10.001)).toBeUndefined();
   });
+
+  it('keeps shared millisecond boundaries correct despite float error', () => {
+    const clips = [
+      { endMs: 1009, id: 'clip-a', startMs: 0 },
+      { endMs: 2009, id: 'clip-b', startMs: 1009 },
+      { endMs: 3009, id: 'clip-c', startMs: 2009 },
+    ];
+
+    // 1.009 * 1000 === 1008.9999999999999，未归一时会命中前一个片段。
+    expect(findClipAtSeconds(clips, 1.009)?.id).toBe('clip-b');
+    expect(findClipAtSeconds(clips, 1.008)?.id).toBe('clip-a');
+    expect(findClipAtSeconds(clips, 2.009)?.id).toBe('clip-c');
+  });
+
+  it('still holds the last frame on a shared boundary at the project end', () => {
+    const clips = [
+      { endMs: 1009, id: 'clip-a', startMs: 0 },
+      { endMs: 2009, id: 'clip-b', startMs: 1009 },
+    ];
+
+    expect(findClipAtSeconds(clips, 2.009)?.id).toBe('clip-b');
+  });
 });
 
 describe('buildPreviewMediaPlan audio', () => {

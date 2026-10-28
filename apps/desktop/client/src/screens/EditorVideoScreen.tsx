@@ -14,12 +14,14 @@ import { createChatHash } from '../lib/routes';
 import { AutosaveController } from './editor-video/autosave';
 import {
   canRedoSession,
+  canSaveSession,
   canUndoSession,
   createEditorSession,
   editorSessionReducer,
   isEditorReadOnly,
   type EditorSessionState,
 } from './editor-video/editor-session';
+import { describeReadonlyBanner, describeSaveStatus } from './editor-video/editor-status';
 import { EditorEmpty, EditorLoading, EditorUnavailable } from './editor-video/EditorStates';
 import {
   loadEditorProject,
@@ -35,6 +37,7 @@ import { createSelection, selectionReducer } from './editor-video/selection';
 import { resolveSubtitleOverlay } from './editor-video/subtitle-overlay';
 import {
   buildEditorTimeline,
+  collectMissingMedia,
   sliderFromZoom,
   zoomFromSlider,
   type EditorTrackKind,
@@ -81,17 +84,6 @@ const TRACK_ICONS: Record<EditorTrackKind, EditorIconName> = {
   video: 'video-track',
   voice: 'mic-track',
 };
-
-const ANALYSIS_TEXT = `我来分析你的文稿，这是一份关于“前端AI进阶学习路线”的教学内容，时间线清晰、结构完整。让我先加载制片技能来完成方案设计。
-
-我已经加载了制片技能。现在分析你的文稿：
-
-这是一份完整的技术教学口播稿，主题聚焦“前端AI进阶学习路线”，包含4个时间段的内容：
-
-•  开场问题引入（0:00-0:25）
-•  为什么不能直接学AI（0:25-0:55）
-•  三个月学习路线详解（0:55-2:45）
-•  收尾总结（2:45-3:05）`;
 
 type EditorRailId = 'video' | 'voice' | 'subtitle' | 'music';
 
@@ -260,16 +252,26 @@ export function EditorVideoScreen({ projectId }: { projectId: string }) {
       key={state.view.projectId}
       project={state.project}
       readonly={isEditorReadOnly(workflowStatus)}
+      readonlyMessage={describeReadonlyBanner(workflowStatus)}
     />
   );
 }
 
-function EditorWorkspace({ project, readonly }: { project: VideoProject; readonly: boolean }) {
+function EditorWorkspace({
+  project,
+  readonly,
+  readonlyMessage,
+}: {
+  project: VideoProject;
+  readonly: boolean;
+  readonlyMessage: string | null;
+}) {
   const [session, sessionDispatch] = useReducer(editorSessionReducer, project, (initialProject) =>
     createEditorSession(initialProject, { readonly }),
   );
   const view = useMemo(() => buildEditorProjectView(session.project), [session.project]);
   const timeline = useMemo(() => buildEditorTimeline(session.project), [session.project]);
+  const missingMedia = useMemo(() => collectMissingMedia(timeline), [timeline]);
   const spanSeconds = timeline.durationSeconds > 0 ? timeline.durationSeconds : 1;
   const { currentTime, pause, playing, seek, toggle } = usePlaybackClock(timeline.durationSeconds);
   const [selection, dispatch] = useReducer(
@@ -284,7 +286,6 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   const [timecodeDraft, setTimecodeDraft] = useState('');
   const [contextOpen, setContextOpen] = useState(true);
   const [quickOpen, setQuickOpen] = useState(true);
-  const [draft, setDraft] = useState('');
   const [zoom, setZoom] = useState(1);
   const [tools, setTools] = useState<Record<TimelineToolId, boolean>>({
     snap: true,
@@ -393,26 +394,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     return [...ids];
   }, [session.project]);
   const waveforms = useAudioWaveforms(view.projectId, audioAssetIds, tools.wave);
-  const saveKind =
-    session.saveStatus === 'conflict'
-      ? 'conflict'
-      : session.saveStatus === 'saving'
-        ? 'saving'
-        : session.saveStatus === 'error'
-          ? 'error'
-          : session.dirty
-            ? 'dirty'
-            : 'saved';
-  const saveLabel =
-    session.saveStatus === 'conflict'
-      ? '保存冲突'
-      : session.saveStatus === 'saving'
-        ? '保存中'
-        : session.saveStatus === 'error'
-          ? '保存失败'
-          : session.dirty
-            ? '待保存'
-            : '已保存';
+  const saveStatusView = describeSaveStatus(session.saveStatus, session.dirty);
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -454,7 +436,8 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   const persistProject = useCallback(async () => {
     const current = sessionRef.current;
 
-    if (!current.dirty) {
+    // 只读（工作流运行/等待审批）或冲突状态下不写盘，避免覆盖别处的新修订。
+    if (!current.dirty || !canSaveSession(current)) {
       return;
     }
 
@@ -502,6 +485,27 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
       autosaveRef.current = null;
     };
   }, [persistProject]);
+
+  // 只读期间停掉自动保存；解锁后若仍有未保存的编辑，重新排一次保存。
+  const wasReadonlyRef = useRef(readonly);
+
+  useEffect(() => {
+    const wasReadonly = wasReadonlyRef.current;
+    wasReadonlyRef.current = readonly;
+
+    if (readonly) {
+      autosaveRef.current?.stop();
+      return;
+    }
+
+    if (wasReadonly && sessionRef.current.saveStatus !== 'conflict') {
+      autosaveRef.current?.resume();
+
+      if (sessionRef.current.dirty) {
+        autosaveRef.current?.noteEdit();
+      }
+    }
+  }, [readonly]);
 
   // 每次成功编辑（含撤销/重做）后重置 2s 防抖窗口。
   useEffect(() => {
@@ -571,6 +575,18 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
 
       if (key === 's') {
         event.preventDefault();
+
+        const current = sessionRef.current;
+
+        if (!canSaveSession(current)) {
+          notify(
+            current.saveStatus === 'conflict'
+              ? '保存冲突，请先重新加载工程。'
+              : '编辑器只读，暂不能保存。',
+          );
+          return;
+        }
+
         void autosaveRef.current?.flush();
         return;
       }
@@ -735,18 +751,6 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     }
 
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
-  };
-
-  const sendDraft = () => {
-    const text = draft.trim();
-
-    if (!text) {
-      notify('请输入你的想法。');
-      return;
-    }
-
-    setDraft('');
-    notify(`已记录「${text}」；模型执行将在 T20 接入。`);
   };
 
   const toggleTimelineTool = (id: TimelineToolId, label: string) => {
@@ -1340,7 +1344,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
           {...shared}
           className={`ed-timeline-clip ed-video-bar${activeClass}${dragging ? ' is-dragging' : ''}`}
           style={barStyle}
-          title={clip.label}
+          title={`${clip.label}${clip.missing ? '（素材缺失）' : ''}`}
           onPointerDown={(event) => beginSceneDrag(event, clip)}
           onPointerMove={moveSceneDrag}
           onPointerUp={endSceneDrag}
@@ -1348,6 +1352,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
         >
           <span className="ed-bar-accent" style={{ background: tone.accent }} />
           <span className="ed-video-name">{clip.label}</span>
+          {clip.missing ? <span className="ed-clip-badge is-missing">缺失</span> : null}
           {clip.thumbnailIds?.length ? (
             <span className="ed-thumbs" aria-hidden="true">
               {clip.thumbnailIds.slice(0, 4).map((thumbnailId) => (
@@ -1384,10 +1389,11 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
           key={clip.id}
           {...shared}
           className={`ed-timeline-clip ed-voice-bar${activeClass}`}
-          title={clip.label}
+          title={`${clip.label}${clip.missing ? '（素材缺失）' : ''}`}
         >
           <span className="ed-voice-name">{clip.label}</span>
           {clip.badge ? <span className="ed-clip-badge">{clip.badge}</span> : null}
+          {clip.missing ? <span className="ed-clip-badge is-missing">缺失</span> : null}
           {tools.wave ? <ClipWaveform {...waveformForClip(clip)} /> : null}
         </button>
       );
@@ -1425,12 +1431,13 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
           onPointerDown={(event) => beginClipDrag(event, clip, 'move')}
           onPointerMove={moveClipDrag}
           onPointerUp={endClipDrag}
-          title={clip.label}
+          title={`${clip.label}${clip.missing ? '（素材缺失）' : ''}`}
           type="button"
         >
           <span className="ed-bar-accent" style={{ background: 'var(--ed-blue)' }} />
           <EditorIcon name="music" size={15} />
           <span className="ed-tl-music-name">{clip.label}</span>
+          {clip.missing ? <span className="ed-clip-badge is-missing">缺失</span> : null}
           {clip.loop ? <span className="ed-clip-badge">循环</span> : null}
           {clip.artist ? <span className="ed-tl-music-artist">{clip.artist}</span> : null}
           {tools.wave ? <ClipWaveform {...waveformForClip(clip)} /> : null}
@@ -1479,13 +1486,13 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
 
         <div className="ed-topbar-actions">
           <div
-            className={`ed-save ed-save-${saveKind}`}
+            className={`ed-save ed-save-${saveStatusView.kind}`}
             role="status"
             aria-live="polite"
             title={session.lastSaveError ?? undefined}
           >
             <span className="ed-save-dot" aria-hidden="true" />
-            <span>{saveLabel}</span>
+            <span>{saveStatusView.label}</span>
             {session.saveStatus === 'conflict' ? (
               <button className="ed-save-reload" type="button" onClick={() => void reloadProject()}>
                 重新加载
@@ -1507,7 +1514,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
       {session.readonly ? (
         <div className="ed-readonly-banner" role="status">
           <EditorIcon name="lock" size={14} />
-          AI 工作流正在运行或等待审批，编辑器暂时只读；完成后即可继续编辑。
+          {readonlyMessage ?? 'AI 工作流正在运行或等待审批，编辑器暂时只读。'}
         </div>
       ) : null}
 
@@ -1551,6 +1558,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
             currentTime={currentTime}
             hasMusicTrack={hasMusicTrack}
             hasVoiceTrack={hasVoiceTrack}
+            missingMedia={missingMedia}
             muted={muted}
             plan={previewPlan}
             playing={playing}
@@ -1635,51 +1643,51 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
         >
           {activeRail === 'video' ? (
             <>
-              <div className="ed-right-date">6月10日 17:42</div>
+              <div className="ed-right-date">{view.updatedLabel}</div>
 
               <div className="ed-right-scroll-wrap">
                 <div className="ed-right-scroll" ref={scrollRef}>
-                  <div className="ed-context">
-                    <div className="ed-context-head">
-                      <span className="ed-context-title">0:00-0:25 开场问题</span>
-                      <button
-                        className="ed-context-toggle"
-                        type="button"
-                        aria-expanded={contextOpen}
-                        aria-label={contextOpen ? '收起上下文' : '展开上下文'}
-                        onClick={() => setContextOpen((value) => !value)}
-                      >
-                        <EditorIcon name="chevron-down" size={17} />
-                      </button>
-                    </div>
-
-                    {contextOpen ? (
-                      <>
-                        <p className="ed-context-summary">
-                          {
-                            '大家好，很多前端同学现在都在焦虑一件事：\nAI到底应该怎么学。我先问一下大家，如果...'
-                          }
-                        </p>
-                        <div className="ed-context-divider" />
-                        <div className="ed-context-tags">
-                          <div className="ed-tag-row">
-                            <span className="ed-tag ed-tag-label">视频画面</span>
-                            <span className="ed-tag ed-tag-value">智能匹配素材</span>
-                          </div>
-                          <div className="ed-tag-row">
-                            <span className="ed-tag ed-tag-label">旁白配音</span>
-                            <span className="ed-tag ed-tag-value">温婉学姐</span>
-                          </div>
-                          <div className="ed-tag-row">
-                            <span className="ed-tag ed-tag-label">创作倾向</span>
-                            <span className="ed-tag ed-tag-value">AI智能创作（默认）</span>
-                          </div>
+                  {selectedScene ? (
+                    <>
+                      <div className="ed-context">
+                        <div className="ed-context-head">
+                          <span className="ed-context-title">
+                            {selectedScene.rangeLabel} {selectedScene.heading}
+                          </span>
+                          <button
+                            className="ed-context-toggle"
+                            type="button"
+                            aria-expanded={contextOpen}
+                            aria-label={contextOpen ? '收起上下文' : '展开上下文'}
+                            onClick={() => setContextOpen((value) => !value)}
+                          >
+                            <EditorIcon name="chevron-down" size={17} />
+                          </button>
                         </div>
-                      </>
-                    ) : null}
-                  </div>
 
-                  <p className="ed-analysis">{ANALYSIS_TEXT}</p>
+                        {contextOpen ? (
+                          <>
+                            <p className="ed-context-summary">{selectedScene.script}</p>
+                            <div className="ed-context-divider" />
+                            <div className="ed-context-tags">
+                              {selectedScene.tags.map((tag) => (
+                                <div key={tag.label} className="ed-tag-row">
+                                  <span className="ed-tag ed-tag-label">{tag.label}</span>
+                                  <span className="ed-tag ed-tag-value">{tag.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+
+                      {selectedScene.analysis ? (
+                        <p className="ed-analysis">{selectedScene.analysis}</p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="ed-right-empty">左侧选择一个分镜，查看画面上下文。</p>
+                  )}
                 </div>
 
                 <div className="ed-scroll-bottom-bar">
@@ -1692,7 +1700,10 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
 
               <div className={`ed-quick${quickOpen ? '' : ' is-collapsed'}`}>
                 <div className="ed-quick-head">
-                  <span>快捷调整</span>
+                  <span>
+                    快捷调整
+                    <span className="ed-followup-chip">后续</span>
+                  </span>
                   <button
                     className="ed-quick-toggle"
                     type="button"
@@ -1708,15 +1719,10 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
                   <div className="ed-quick-box">
                     <input
                       className="ed-quick-input"
-                      value={draft}
-                      placeholder="输入你的任何想法"
-                      onChange={(event) => setDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          sendDraft();
-                        }
-                      }}
+                      disabled
+                      placeholder="快捷调整将在 T20 接入"
+                      aria-label="快捷调整（后续版本开放）"
+                      title="快捷调整将在 T20 接入"
                     />
 
                     <div className="ed-quick-actions">
@@ -1726,8 +1732,9 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
                         <button
                           className="ed-quick-unlink"
                           type="button"
-                          aria-label="解除分镜关联"
-                          onClick={() => notify('解除关联将在 T20 实现。')}
+                          disabled
+                          aria-label="解除分镜关联（后续版本开放）"
+                          title="解除关联将在后续版本开放"
                         >
                           <EditorIcon name="close" size={12} />
                         </button>
@@ -1735,8 +1742,9 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
                       <button
                         className="ed-quick-send"
                         type="button"
-                        aria-label="发送快捷调整"
-                        onClick={sendDraft}
+                        disabled
+                        aria-label="发送快捷调整（后续版本开放）"
+                        title="快捷调整将在 T20 接入"
                       >
                         <EditorIcon name="send" size={19} />
                       </button>
@@ -1746,11 +1754,11 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
               </div>
             </>
           ) : activeRail === 'voice' ? (
-            <VoicePanel onNotify={notify} />
+            <VoicePanel />
           ) : activeRail === 'subtitle' ? (
-            <SubtitlePanel onNotify={notify} />
+            <SubtitlePanel />
           ) : (
-            <MusicPanel onNotify={notify} />
+            <MusicPanel />
           )}
         </aside>
 
@@ -1870,7 +1878,8 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
               className="ed-icon-button"
               type="button"
               aria-label="新增轨道"
-              onClick={() => notify('新增轨道将在 T17 实现。')}
+              title="新增轨道将在后续版本提供"
+              disabled
             >
               <EditorIcon name="plus" size={15} />
             </button>

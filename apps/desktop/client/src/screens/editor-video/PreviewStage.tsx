@@ -25,6 +25,7 @@ import {
 } from './preview-media';
 import type { SubtitleOverlay } from './subtitle-overlay';
 import { formatTime } from './timeline';
+import type { MissingMediaMarker } from './timeline-geometry';
 import {
   createVideoSlots,
   markSlotFailed,
@@ -41,6 +42,7 @@ interface PreviewStageProps {
   currentTime: number;
   hasMusicTrack: boolean;
   hasVoiceTrack: boolean;
+  missingMedia: readonly MissingMediaMarker[];
   muted: boolean;
   plan: PreviewMediaPlan;
   playing: boolean;
@@ -61,6 +63,7 @@ export function PreviewStage({
   currentTime,
   hasMusicTrack,
   hasVoiceTrack,
+  missingMedia,
   muted,
   plan,
   playing,
@@ -169,6 +172,11 @@ export function PreviewStage({
   const imagePlan = plan.video?.mediaType === 'image' ? plan.video : null;
   const loading = !plan.videoIssue && !activeError && videoPlan !== null && visibleKey === null;
   const empty = plan.video === null && plan.videoIssue === null;
+  // 缺失素材已由持久化标记统一提示，避免同一个音频缺失出现两条相同信息。
+  const missingAudioAssetIds = new Set(
+    missingMedia.filter((marker) => marker.kind !== 'video').map((marker) => marker.assetId),
+  );
+  const audioIssues = plan.audioIssues.filter((issue) => !missingAudioAssetIds.has(issue.assetId));
 
   return (
     <div
@@ -239,11 +247,16 @@ export function PreviewStage({
 
       {plan.voice?.isMock ? <span className="ed-preview-mock">模拟配音</span> : null}
 
-      {plan.audioIssues.length > 0 || audioError ? (
+      {audioIssues.length > 0 || missingMedia.length > 0 || audioError ? (
         <div className="ed-preview-media-issues">
-          {plan.audioIssues.map((issue) => (
+          {audioIssues.map((issue) => (
             <span key={`${issue.kind}-${issue.assetId}`} className="ed-preview-issue">
               {issue.message}
+            </span>
+          ))}
+          {missingMedia.map((marker) => (
+            <span key={`missing-${marker.kind}-${marker.assetId}`} className="ed-preview-issue">
+              {marker.message}
             </span>
           ))}
           {audioError ? <span className="ed-preview-issue">{audioError}</span> : null}

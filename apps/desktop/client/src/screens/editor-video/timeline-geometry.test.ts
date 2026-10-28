@@ -4,6 +4,7 @@ import {
   buildEditorTimeline,
   buildTimelineTicks,
   clampZoom,
+  collectMissingMedia,
   MAX_ZOOM,
   MIN_ZOOM,
   projectDurationSeconds,
@@ -292,6 +293,84 @@ describe('buildEditorTimeline', () => {
 
     expect(voice.clips.map((clip) => clip.badge)).toEqual(['模拟', '模拟']);
     expect(subtitle.clips.map((clip) => clip.text)).toEqual(['第一句字幕', '第二句字幕']);
+  });
+
+  it('keeps registered video and voice assets unmarked', () => {
+    expect(timeline.tracks[0]?.clips.map((clip) => clip.missing)).toEqual([false, false]);
+    expect(timeline.tracks[1]?.clips.map((clip) => clip.missing)).toEqual([false, false]);
+  });
+
+  it('marks video and voice clips whose asset is not registered', () => {
+    const missingAssets = buildEditorTimeline({
+      ...PROJECT,
+      assets: { music: [], subtitles: [], thumbnails: [], videos: [], voices: [] },
+    });
+
+    expect(missingAssets.tracks[0]?.clips.map((clip) => clip.missing)).toEqual([true, true]);
+    expect(missingAssets.tracks[1]?.clips.map((clip) => clip.missing)).toEqual([true, true]);
+  });
+
+  it('marks a music clip whose asset is not registered', () => {
+    const withMissingMusic = buildEditorTimeline({
+      ...PROJECT,
+      tracks: PROJECT.tracks.map((track) =>
+        track.kind === 'music'
+          ? {
+              ...track,
+              clips: [
+                {
+                  assetId: 'music-missing',
+                  endMs: 6_000,
+                  id: 'clip-music-missing',
+                  kind: 'music' as const,
+                  startMs: 0,
+                  sourceEndMs: 6_000,
+                  sourceStartMs: 0,
+                },
+              ],
+            }
+          : track,
+      ),
+    });
+
+    expect(withMissingMusic.tracks[3]?.clips.map((clip) => clip.missing)).toEqual([true]);
+  });
+
+  it('collects one preview marker per missing media asset', () => {
+    const withMissingMusic = buildEditorTimeline({
+      ...PROJECT,
+      assets: { ...PROJECT.assets, music: [], videos: [], voices: [] },
+      tracks: PROJECT.tracks.map((track) =>
+        track.kind === 'music'
+          ? {
+              ...track,
+              clips: [
+                {
+                  assetId: 'music-missing',
+                  endMs: 6_000,
+                  id: 'clip-music-missing',
+                  kind: 'music' as const,
+                  startMs: 0,
+                  sourceEndMs: 6_000,
+                  sourceStartMs: 0,
+                },
+              ],
+            }
+          : track,
+      ),
+    });
+
+    expect(collectMissingMedia(withMissingMusic)).toEqual([
+      { assetId: 'video-1', kind: 'video', message: '视频素材缺失：分镜 01' },
+      { assetId: 'video-2', kind: 'video', message: '视频素材缺失：分镜 02' },
+      { assetId: 'voice-1', kind: 'voice', message: '配音素材缺失：配音 01' },
+      { assetId: 'voice-2', kind: 'voice', message: '配音素材缺失：配音 02' },
+      { assetId: 'music-missing', kind: 'music', message: '音乐素材缺失：音乐' },
+    ]);
+  });
+
+  it('collects no preview markers when every asset is registered', () => {
+    expect(collectMissingMedia(timeline)).toEqual([]);
   });
 
   it('carries music metadata when the track has clips', () => {

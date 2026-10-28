@@ -1,12 +1,32 @@
-import type { Scene, StoredProject, SubtitleTrack, VideoProject } from '@miaoma/video-project';
+import { VOICE_PRESETS } from '@miaoma/video-project';
+import type {
+  Scene,
+  StoredProject,
+  SubtitleTrack,
+  VideoProject,
+  VoiceClip,
+  VoiceTrack,
+} from '@miaoma/video-project';
 import type { IpcErrorCode, IpcResponse } from '../../../../shared/ipc-contract';
 import { isValidProjectId } from '../../lib/routes';
 
+/** 画面面板上下文卡的一行标签：左侧类目、右侧当前分镜的取值。 */
+export interface SceneContextTag {
+  label: string;
+  value: string;
+}
+
 export interface EditorSceneView {
+  /** 分镜的画面意图 + 备注合成的分析段落；两者都为空时为 null（面板隐藏该段）。 */
+  analysis: string | null;
   endSeconds: number;
+  /** 分镜自身标题（不是左侧列表的"分镜 01"）。 */
+  heading: string;
   id: string;
   rangeLabel: string;
+  script: string;
   startSeconds: number;
+  tags: SceneContextTag[];
   text: string;
   title: string;
 }
@@ -71,6 +91,78 @@ function findSubtitleTrack(project: VideoProject): SubtitleTrack | undefined {
   return project.tracks.find((track): track is SubtitleTrack => track.kind === 'subtitle');
 }
 
+/** 画面模式与创作倾向在 v1 是固定值（PRD §9.2：仅 AI 智能创作；画面仅智能匹配素材）。 */
+const VIDEO_MODE_LABEL = '智能匹配素材';
+const CREATION_MODE_LABEL = 'AI 智能创作（默认）';
+
+function sceneAnalysis(scene: Scene): string | null {
+  const lines = [scene.visualIntent.trim(), scene.notes.trim()].filter((line) => line.length > 0);
+
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/** 视频画面标签：随分镜已匹配的素材段数变化，缺失的匹配项也如实标出。 */
+function videoTagValue(project: VideoProject, scene: Scene): string {
+  const registeredIds = new Set(project.assets.videos.map((asset) => asset.id));
+  const matched = scene.matchedVideoAssetIds.filter((id) => registeredIds.has(id));
+
+  if (scene.matchedVideoAssetIds.length === 0) {
+    return `${VIDEO_MODE_LABEL} · 未匹配`;
+  }
+
+  const missing = scene.matchedVideoAssetIds.length - matched.length;
+
+  return missing > 0
+    ? `${VIDEO_MODE_LABEL} · ${matched.length} 段（${missing} 个缺失）`
+    : `${VIDEO_MODE_LABEL} · ${matched.length} 段`;
+}
+
+/** 旁白配音标签：音色名来自该分镜配音片段的 preset，缺失时明确标注而不是编造。 */
+function voiceTagValue(project: VideoProject, clip: VoiceClip | undefined): string {
+  if (!clip) {
+    return '未生成配音';
+  }
+
+  const asset = project.assets.voices.find((item) => item.id === clip.assetId);
+
+  if (!asset) {
+    return '配音缺失';
+  }
+
+  const preset = VOICE_PRESETS.find((item) => item.id === clip.voicePreset);
+  const name = preset?.name ?? clip.voicePreset;
+
+  return asset.isMock ? `${name}（模拟）` : name;
+}
+
+function buildSceneTags(
+  project: VideoProject,
+  scene: Scene,
+  voiceClip: VoiceClip | undefined,
+): SceneContextTag[] {
+  return [
+    { label: '视频画面', value: videoTagValue(project, scene) },
+    { label: '旁白配音', value: voiceTagValue(project, voiceClip) },
+    { label: '创作倾向', value: CREATION_MODE_LABEL },
+  ];
+}
+
+/** 每个分镜只取第一条配音片段作为面板标签来源（配音轨按分镜锁定）。 */
+function voiceClipsByScene(project: VideoProject): Map<string, VoiceClip> {
+  const track = project.tracks.find((item): item is VoiceTrack => item.kind === 'voice');
+  const byScene = new Map<string, VoiceClip>();
+
+  for (const clip of (track?.clips ?? [])
+    .slice()
+    .sort((left, right) => left.startMs - right.startMs)) {
+    if (clip.sceneId && !byScene.has(clip.sceneId)) {
+      byScene.set(clip.sceneId, clip);
+    }
+  }
+
+  return byScene;
+}
+
 /**
  * 编辑器左侧列表的数据来源：只认当前 `project.json`，不读历史消息卡。
  * 分镜文本优先拼接字幕轨中该分镜的片段，没有字幕时回退到文稿。
@@ -80,6 +172,7 @@ export function buildEditorProjectView(
   nowMs = Date.now(),
 ): EditorProjectView {
   const subtitleTrack = findSubtitleTrack(project);
+  const voiceByScene = voiceClipsByScene(project);
   const scenes = project.scenes
     .slice()
     .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id));
@@ -91,10 +184,14 @@ export function buildEditorProjectView(
     cursorMs = endMs;
 
     return {
+      analysis: sceneAnalysis(scene),
       endSeconds: endMs / 1_000,
+      heading: scene.title,
       id: scene.id,
       rangeLabel: `${formatEditorClock(startMs)}-${formatEditorClock(endMs)}`,
+      script: scene.script,
       startSeconds: startMs / 1_000,
+      tags: buildSceneTags(project, scene, voiceByScene.get(scene.id)),
       text: sceneSubtitleText(scene.id, subtitleTrack) || scene.script,
       title: sceneLabel(scene),
     };

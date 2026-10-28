@@ -724,6 +724,61 @@
   white-space: pre-wrap;
 }
 
+.ed-right-empty {
+  margin: 0;
+  padding: 18px 4px;
+  color: var(--ed-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* mock 面板统一的"后续"标注与禁用态 */
+.ed-panel-followup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 10px 0 0;
+  color: var(--ed-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.ed-followup-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid rgba(246, 184, 75, 0.4);
+  border-radius: 999px;
+  background: rgba(246, 184, 75, 0.14);
+  color: #f6c96b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.ed-quick-head .ed-followup-chip {
+  margin-left: 6px;
+}
+
+.ed-panel button:disabled,
+.ed-panel input:disabled {
+  cursor: not-allowed;
+}
+
+.ed-panel button:disabled {
+  opacity: 0.62;
+}
+
+.ed-panel input:disabled {
+  opacity: 0.55;
+}
+
 .ed-scroll-bottom-bar {
   display: flex;
   flex: none;
@@ -1342,6 +1397,12 @@
   color: rgba(255, 255, 255, 0.78);
   font-size: 10px;
   font-weight: 700;
+}
+
+/* 缺失素材标记：时间线上不重新定位，只做显式提示 */
+.ed-clip-badge.is-missing {
+  background: rgba(240, 95, 115, 0.3);
+  color: #ffd0d6;
 }
 
 .ed-subtitle-text {

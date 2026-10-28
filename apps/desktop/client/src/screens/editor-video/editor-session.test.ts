@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { VideoProject } from '@miaoma/video-project';
 import {
   canRedoSession,
+  canSaveSession,
   canUndoSession,
   createEditorSession,
   editorSessionReducer,
@@ -296,5 +297,31 @@ describe('isEditorReadOnly', () => {
     expect(isEditorReadOnly('failed')).toBe(false);
     expect(isEditorReadOnly('cancelled')).toBe(false);
     expect(isEditorReadOnly(null)).toBe(false);
+  });
+});
+
+describe('canSaveSession', () => {
+  it('allows saving an editable session with pending edits', () => {
+    const session = reduce(createEditorSession(createEditingProject()), reorder('scene-3', 0));
+
+    expect(canSaveSession(session)).toBe(true);
+  });
+
+  it('blocks saving while the workflow keeps the editor read-only', () => {
+    const session = createEditorSession(createEditingProject(), { readonly: true });
+
+    expect(canSaveSession(session)).toBe(false);
+  });
+
+  it('blocks saving after a conflict until the project is reloaded', () => {
+    const edited = reduce(createEditorSession(createEditingProject()), reorder('scene-3', 0));
+    const conflict = reduce(edited, { type: 'save-conflict' });
+    const reloaded = reduce(conflict, {
+      project: withRevision(createEditingProject(), 5),
+      type: 'reload',
+    });
+
+    expect(canSaveSession(conflict)).toBe(false);
+    expect(canSaveSession(reloaded)).toBe(true);
   });
 });

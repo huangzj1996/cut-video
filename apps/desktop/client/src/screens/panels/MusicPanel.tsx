@@ -1,11 +1,11 @@
-import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { EditorIcon } from '../editor-icons';
 import './music-panel.css';
 
-interface MusicPanelProps {
-  onNotify?: (message: string) => void;
-}
+/**
+ * 音乐面板首版保持 mock：推荐曲库与音量只展示，写操作全部禁用并标注"后续"，
+ * 不上传、不应用、不写工程。
+ */
 
 type MusicCategory = '平静' | '欢快' | '励志';
 type MusicFilter = '全部' | MusicCategory;
@@ -117,6 +117,10 @@ const TRACKS: readonly MusicTrack[] = [
 
 const FILTERS: readonly MusicFilter[] = ['全部', '平静', '欢快', '励志'];
 
+const CURRENT_FILTER: MusicFilter = '平静';
+const CURRENT_TRACK_ID = 'eutopia';
+const CURRENT_VOLUME = 60;
+
 function FilterIcon() {
   return (
     <svg
@@ -136,34 +140,36 @@ function FilterIcon() {
   );
 }
 
-export function MusicPanel({ onNotify }: MusicPanelProps) {
-  const [enabled, setEnabled] = useState(true);
-  const [volume, setVolume] = useState(60);
-  const [filter, setFilter] = useState<MusicFilter>('平静');
-  const [selectedId, setSelectedId] = useState('eutopia');
-
-  const selectedTrack = TRACKS.find((track) => track.id === selectedId) ?? null;
+export function MusicPanel() {
+  const selectedTrack = TRACKS.find((track) => track.id === CURRENT_TRACK_ID) ?? null;
   const visibleTracks =
-    filter === '全部' ? TRACKS : TRACKS.filter((track) => track.category === filter);
+    CURRENT_FILTER === '全部'
+      ? TRACKS
+      : TRACKS.filter((track) => track.category === CURRENT_FILTER);
 
   return (
-    <div className={`ed-panel ed-music-panel${enabled ? '' : ' is-off'}`}>
+    <div className="ed-panel ed-music-panel">
       <div className="ed-music-scroll">
         <header className="ed-music-head">
           <div className="ed-music-title-group">
             <h2 className="ed-music-title">音乐设置</h2>
             <p className="ed-music-subtitle">控制背景音乐与推荐曲库</p>
+            <p className="ed-panel-followup" role="note">
+              <span className="ed-followup-chip">后续</span>
+              本轮只读：导入、应用与音量调整将在后续版本开放。
+            </p>
           </div>
 
           <div className="ed-music-switch-group">
-            <span className="ed-music-switch-label">{enabled ? '开启' : '关闭'}</span>
+            <span className="ed-music-switch-label">开启</span>
             <button
-              className={`ed-music-switch${enabled ? ' is-on' : ''}`}
+              className="ed-music-switch is-on"
               type="button"
               role="switch"
-              aria-checked={enabled}
-              aria-label="背景音乐开关"
-              onClick={() => setEnabled((value) => !value)}
+              aria-checked
+              aria-label="背景音乐开关（后续版本开放）"
+              title="背景音乐开关将在后续版本开放"
+              disabled
             >
               <span className="ed-music-switch-knob" />
             </button>
@@ -213,7 +219,7 @@ export function MusicPanel({ onNotify }: MusicPanelProps) {
               <EditorIcon name="volume" size={16} />
               <span>音乐音量</span>
             </h3>
-            <span className="ed-music-volume-value">{volume}%</span>
+            <span className="ed-music-volume-value">{CURRENT_VOLUME}%</span>
           </div>
 
           <input
@@ -222,11 +228,11 @@ export function MusicPanel({ onNotify }: MusicPanelProps) {
             min={0}
             max={100}
             step={1}
-            value={volume}
-            disabled={!enabled}
-            aria-label="音乐音量"
-            style={{ '--music-progress': `${volume}%` } as CSSProperties}
-            onChange={(event) => setVolume(Number(event.target.value))}
+            value={CURRENT_VOLUME}
+            disabled
+            aria-label="音乐音量（后续版本开放）"
+            title="音乐音量调整将在后续版本开放"
+            style={{ '--music-progress': `${CURRENT_VOLUME}%` } as CSSProperties}
           />
         </section>
 
@@ -241,11 +247,12 @@ export function MusicPanel({ onNotify }: MusicPanelProps) {
             <button
               className="ed-music-filter"
               type="button"
-              aria-label="音乐筛选"
-              onClick={() => onNotify?.('音乐筛选将在 T17 接入。')}
+              disabled
+              aria-label="音乐筛选（后续版本开放）"
+              title="音乐筛选将在后续版本开放"
             >
               <FilterIcon />
-              <span>{filter}</span>
+              <span>{CURRENT_FILTER}</span>
             </button>
           </div>
 
@@ -253,10 +260,11 @@ export function MusicPanel({ onNotify }: MusicPanelProps) {
             {FILTERS.map((item) => (
               <button
                 key={item}
-                className={`ed-music-tab${filter === item ? ' is-active' : ''}`}
+                className={`ed-music-tab${CURRENT_FILTER === item ? ' is-active' : ''}`}
                 type="button"
-                aria-pressed={filter === item}
-                onClick={() => setFilter(item)}
+                disabled
+                aria-pressed={CURRENT_FILTER === item}
+                title="音乐分类将在后续版本开放"
               >
                 {item}
               </button>
@@ -264,7 +272,8 @@ export function MusicPanel({ onNotify }: MusicPanelProps) {
             <button
               className="ed-music-tab ed-music-more"
               type="button"
-              onClick={() => onNotify?.('更多分类将在 T17 接入。')}
+              disabled
+              title="更多分类将在后续版本开放"
             >
               更多
             </button>
@@ -273,16 +282,16 @@ export function MusicPanel({ onNotify }: MusicPanelProps) {
           <div className="ed-music-list">
             {visibleTracks.length > 0 ? (
               visibleTracks.map((track) => {
-                const isSelected = track.id === selectedId;
-                const isUsing = isSelected && enabled;
+                const isSelected = track.id === CURRENT_TRACK_ID;
 
                 return (
                   <button
                     key={track.id}
                     className={`ed-music-item${isSelected ? ' is-selected' : ''}`}
                     type="button"
+                    disabled
                     aria-pressed={isSelected}
-                    onClick={() => setSelectedId(track.id)}
+                    title="选择与导入音乐将在后续版本开放"
                   >
                     <span
                       className="ed-music-item-cover"
@@ -293,7 +302,7 @@ export function MusicPanel({ onNotify }: MusicPanelProps) {
                     <span className="ed-music-item-info">
                       <span className="ed-music-item-title-row">
                         <span className="ed-music-item-title">{track.title}</span>
-                        {isUsing ? <span className="ed-music-item-using">使用中</span> : null}
+                        {isSelected ? <span className="ed-music-item-using">使用中</span> : null}
                         <span className="ed-music-item-duration">{track.duration}</span>
                       </span>
                       <span className="ed-music-item-meta-row">

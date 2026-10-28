@@ -19,7 +19,7 @@ import {
 } from './editor-video/project-view';
 import { parseTimecode } from './editor-video/playback';
 import { PreviewStage } from './editor-video/PreviewStage';
-import { buildPreviewMediaPlan } from './editor-video/preview-media';
+import { buildPreviewMediaPlan, trackHasClips } from './editor-video/preview-media';
 import { createSelection, selectionReducer } from './editor-video/selection';
 import {
   buildEditorTimeline,
@@ -207,14 +207,8 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     () => buildPreviewMediaPlan(project, currentTime),
     [currentTime, project],
   );
-  const hasVoiceTrack = useMemo(
-    () => project.tracks.some((track) => track.kind === 'voice' && track.clips.length > 0),
-    [project],
-  );
-  const hasMusicTrack = useMemo(
-    () => project.tracks.some((track) => track.kind === 'music' && track.clips.length > 0),
-    [project],
-  );
+  const hasVoiceTrack = useMemo(() => trackHasClips(project, 'voice'), [project]);
+  const hasMusicTrack = useMemo(() => trackHasClips(project, 'music'), [project]);
 
   const notify = useCallback((message: string) => {
     setNotice(message);

@@ -295,6 +295,14 @@ function findTrack<T extends VideoProject['tracks'][number]['kind']>(
     Extract<VideoProject['tracks'][number], { kind: T }> | undefined;
 }
 
+/**
+ * 该轨道是否存在片段。空音乐轨不创建 `<audio>` 元素；空配音轨同理，
+ * 让预览层只在真的有内容时挂载音频。
+ */
+export function trackHasClips(project: VideoProject, kind: 'music' | 'voice'): boolean {
+  return project.tracks.some((track) => track.kind === kind && track.clips.length > 0);
+}
+
 export function buildPreviewMediaPlan(
   project: VideoProject,
   timelineSeconds: number,

@@ -1,66 +1,16 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import { SUBTITLE_PRESET_IDS } from '@miaoma/video-project';
+import type { SubtitlePresetId } from '@miaoma/video-project';
+import { SUBTITLE_PRESET_STYLES } from '../subtitle-presets';
 import './subtitle-panel.css';
 
 interface SubtitlePanelProps {
   onNotify?: (message: string) => void;
 }
 
-interface SubtitlePreset {
-  id: string;
-  label: string;
-  color: string;
-  outline: string;
-  tileBackground?: string;
-  tileBorder?: string;
-}
-
-const PRESETS: readonly SubtitlePreset[] = [
-  {
-    id: 'white-outline',
-    label: '白字黑边',
-    color: '#f5f7fa',
-    outline: '#000000',
-  },
-  {
-    id: 'classic-white',
-    label: '经典白字',
-    color: '#f5f7fa',
-    outline: '#35373c',
-    tileBackground: '#3a3b3e',
-    tileBorder: '#4a4c52',
-  },
-  {
-    id: 'yellow',
-    label: '黄字黑边',
-    color: '#ffd400',
-    outline: '#050505',
-  },
-  {
-    id: 'red',
-    label: '红字白边',
-    color: '#f05f73',
-    outline: '#ffffff',
-  },
-  {
-    id: 'cyan',
-    label: '青灰字幕',
-    color: '#9adfe5',
-    outline: '#14181d',
-  },
-  {
-    id: 'pink',
-    label: '粉色字幕',
-    color: '#ff6ea5',
-    outline: '#ffffff',
-  },
-  {
-    id: 'blue',
-    label: '蓝色字幕',
-    color: '#24cff2',
-    outline: '#0a0e12',
-  },
-];
+/** 样式卡与预览字幕叠层共用同一份预设颜色/描边，避免两处显示不一致。 */
+const PRESETS = SUBTITLE_PRESET_IDS.map((id) => ({ ...SUBTITLE_PRESET_STYLES[id], id }));
 
 const FONT_SIZE_MIN = 24;
 const FONT_SIZE_MAX = 64;
@@ -68,7 +18,7 @@ const FONT_SIZE_MAX = 64;
 export function SubtitlePanel({ onNotify }: SubtitlePanelProps) {
   const [enabled, setEnabled] = useState(true);
   const [fontSize, setFontSize] = useState(42);
-  const [presetId, setPresetId] = useState('white-outline');
+  const [presetId, setPresetId] = useState<SubtitlePresetId>('white-outline');
 
   const selectedPreset = PRESETS.find((preset) => preset.id === presetId) ?? PRESETS[0];
   const progress = ((fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)) * 100;

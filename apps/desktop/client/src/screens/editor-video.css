@@ -340,6 +340,8 @@
   overflow: hidden;
   border-radius: 8px;
   background: #000;
+  /* 字幕字号用容器查询单位，必须让舞台成为尺寸容器；全屏时自动跟随新尺寸。 */
+  container-type: size;
 }
 
 .ed-preview--empty {
@@ -368,6 +370,39 @@
   height: 100%;
   background: #000;
   object-fit: contain;
+}
+
+/* 字幕叠层：字号、底部安全区与宽度都按 1920×1080 画布等比换算；
+   舞台宽或高先触边时取较小的比例，与 object-fit: contain 的画面缩放一致。 */
+.ed-preview-subtitles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ed-preview-subtitle {
+  position: absolute;
+  /* 底部安全区取画面内 7%：画面上下留黑边时（舞台比 16:9 更高）把黑边高度加回来。 */
+  bottom: max(7cqh, 50cqh - 24.1875cqw);
+  left: 50%;
+  display: -webkit-box;
+  width: min(84cqw, 149.3333cqh);
+  margin: 0;
+  overflow: hidden;
+  transform: translateX(-50%);
+  color: var(--ed-subtitle-color, #f5f7fa);
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: var(--ed-subtitle-font-size, 2.1875cqw);
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  -webkit-text-stroke: 0.045em var(--ed-subtitle-outline, #000);
+  paint-order: stroke fill;
 }
 
 .ed-preview-placeholder {

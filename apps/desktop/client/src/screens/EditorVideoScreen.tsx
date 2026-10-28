@@ -21,6 +21,7 @@ import { parseTimecode } from './editor-video/playback';
 import { PreviewStage } from './editor-video/PreviewStage';
 import { buildPreviewMediaPlan, trackHasClips } from './editor-video/preview-media';
 import { createSelection, selectionReducer } from './editor-video/selection';
+import { resolveSubtitleOverlay } from './editor-video/subtitle-overlay';
 import {
   buildEditorTimeline,
   sliderFromZoom,
@@ -205,6 +206,10 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
   const playheadRatio = Math.min(1, Math.max(0, currentTime / spanSeconds));
   const previewPlan = useMemo(
     () => buildPreviewMediaPlan(project, currentTime),
+    [currentTime, project],
+  );
+  const subtitleOverlay = useMemo(
+    () => resolveSubtitleOverlay(project, currentTime),
     [currentTime, project],
   );
   const hasVoiceTrack = useMemo(() => trackHasClips(project, 'voice'), [project]);
@@ -621,6 +626,7 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
             playing={playing}
             projectId={view.projectId}
             stageRef={stageRef}
+            subtitle={subtitleOverlay}
           />
           <div className="ed-preview-bar">
             {timecodeEditing ? (

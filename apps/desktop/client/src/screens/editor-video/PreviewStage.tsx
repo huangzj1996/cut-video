@@ -6,7 +6,7 @@
  * 因此正常切镜时不需要等待加载，也不会出现长时间黑屏。
  */
 import { useEffect, useRef, useState } from 'react';
-import type { RefObject } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import { assetUrl } from '../../lib/media';
 import {
   alignMediaElement,
@@ -23,6 +23,7 @@ import {
   type PreviewMediaPlan,
   type PreviewVideoPlan,
 } from './preview-media';
+import type { SubtitleOverlay } from './subtitle-overlay';
 import { formatTime } from './timeline';
 import {
   createVideoSlots,
@@ -45,6 +46,7 @@ interface PreviewStageProps {
   playing: boolean;
   projectId: string;
   stageRef: RefObject<HTMLDivElement | null>;
+  subtitle: SubtitleOverlay | null;
 }
 
 function videoPlanOf(plan: PreviewVideoPlan | null): PreviewVideoPlan | null {
@@ -64,6 +66,7 @@ export function PreviewStage({
   playing,
   projectId,
   stageRef,
+  subtitle,
 }: PreviewStageProps) {
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
@@ -194,6 +197,24 @@ export function PreviewStage({
 
       {imagePlan ? (
         <img alt="" className="ed-preview-image" src={assetUrl(projectId, imagePlan.assetId)} />
+      ) : null}
+
+      {subtitle ? (
+        <div className="ed-preview-subtitles">
+          <p
+            className="ed-preview-subtitle"
+            data-preset={subtitle.presetId}
+            style={
+              {
+                '--ed-subtitle-color': subtitle.color,
+                '--ed-subtitle-font-size': subtitle.fontSizeCss,
+                '--ed-subtitle-outline': subtitle.outline,
+              } as CSSProperties
+            }
+          >
+            {subtitle.text}
+          </p>
+        </div>
       ) : null}
 
       {plan.videoIssue ? (

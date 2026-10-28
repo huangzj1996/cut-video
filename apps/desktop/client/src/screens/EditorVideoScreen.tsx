@@ -100,12 +100,18 @@ const RAIL_ITEMS: readonly RailItem[] = [
   { id: 'music', label: '音乐', icon: 'music' },
 ];
 
-type TimelineToolId = 'snap' | 'link' | 'wave';
+interface TimelineTool {
+  /** 尚无对应行为的开关：禁用并提示后续版本提供，避免只切本地状态。 */
+  future?: boolean;
+  icon: EditorIconName;
+  id: 'link' | 'snap' | 'wave';
+  label: string;
+}
 
-const TIMELINE_TOOLS: readonly { id: TimelineToolId; label: string; icon: EditorIconName }[] = [
-  { id: 'snap', label: '吸附', icon: 'magnet' },
-  { id: 'link', label: '联动', icon: 'link' },
-  { id: 'wave', label: '波形', icon: 'wave' },
+const TIMELINE_TOOLS: readonly TimelineTool[] = [
+  { future: true, icon: 'magnet', id: 'snap', label: '吸附' },
+  { future: true, icon: 'link', id: 'link', label: '联动' },
+  { icon: 'wave', id: 'wave', label: '波形' },
 ];
 
 type EditableClipKind = 'music' | 'subtitle';
@@ -287,11 +293,7 @@ function EditorWorkspace({
   const [contextOpen, setContextOpen] = useState(true);
   const [quickOpen, setQuickOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
-  const [tools, setTools] = useState<Record<TimelineToolId, boolean>>({
-    snap: true,
-    link: false,
-    wave: true,
-  });
+  const [waveformsVisible, setWaveformsVisible] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [draggingSceneId, setDraggingSceneId] = useState<string | null>(null);
@@ -393,7 +395,7 @@ function EditorWorkspace({
 
     return [...ids];
   }, [session.project]);
-  const waveforms = useAudioWaveforms(view.projectId, audioAssetIds, tools.wave);
+  const waveforms = useAudioWaveforms(view.projectId, audioAssetIds, waveformsVisible);
   const saveStatusView = describeSaveStatus(session.saveStatus, session.dirty);
 
   const notify = useCallback((message: string) => {
@@ -753,11 +755,11 @@ function EditorWorkspace({
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
   };
 
-  const toggleTimelineTool = (id: TimelineToolId, label: string) => {
-    const next = !tools[id];
+  const toggleWaveforms = () => {
+    const next = !waveformsVisible;
 
-    setTools((previous) => ({ ...previous, [id]: next }));
-    notify(`${label}已${next ? '开启' : '关闭'}。`);
+    setWaveformsVisible(next);
+    notify(`波形已${next ? '开启' : '关闭'}。`);
   };
 
   const selectClip = (clip: TimelineTrackClip) => {
@@ -1394,7 +1396,7 @@ function EditorWorkspace({
           <span className="ed-voice-name">{clip.label}</span>
           {clip.badge ? <span className="ed-clip-badge">{clip.badge}</span> : null}
           {clip.missing ? <span className="ed-clip-badge is-missing">缺失</span> : null}
-          {tools.wave ? <ClipWaveform {...waveformForClip(clip)} /> : null}
+          {waveformsVisible ? <ClipWaveform {...waveformForClip(clip)} /> : null}
         </button>
       );
     }
@@ -1440,7 +1442,7 @@ function EditorWorkspace({
           {clip.missing ? <span className="ed-clip-badge is-missing">缺失</span> : null}
           {clip.loop ? <span className="ed-clip-badge">循环</span> : null}
           {clip.artist ? <span className="ed-tl-music-artist">{clip.artist}</span> : null}
-          {tools.wave ? <ClipWaveform {...waveformForClip(clip)} /> : null}
+          {waveformsVisible ? <ClipWaveform {...waveformForClip(clip)} /> : null}
         </button>
         {renderTrimHandles(clip, '音乐')}
       </div>
@@ -1845,18 +1847,32 @@ function EditorWorkspace({
               <EditorIcon name="trash" size={15} />
             </button>
 
-            {TIMELINE_TOOLS.map((tool) => (
-              <button
-                key={tool.id}
-                className={`ed-icon-button${tools[tool.id] ? ' is-active' : ''}`}
-                type="button"
-                aria-label={tool.label}
-                aria-pressed={tools[tool.id]}
-                onClick={() => toggleTimelineTool(tool.id, tool.label)}
-              >
-                <EditorIcon name={tool.icon} size={15} />
-              </button>
-            ))}
+            {TIMELINE_TOOLS.map((tool) =>
+              tool.future ? (
+                <button
+                  key={tool.id}
+                  className="ed-icon-button"
+                  type="button"
+                  aria-label={tool.label}
+                  title={`${tool.label}将在后续版本提供`}
+                  disabled
+                >
+                  <EditorIcon name={tool.icon} size={15} />
+                </button>
+              ) : (
+                <button
+                  key={tool.id}
+                  className={`ed-icon-button${waveformsVisible ? ' is-active' : ''}`}
+                  type="button"
+                  aria-label={tool.label}
+                  aria-pressed={waveformsVisible}
+                  title="显示或隐藏真实波形"
+                  onClick={toggleWaveforms}
+                >
+                  <EditorIcon name={tool.icon} size={15} />
+                </button>
+              ),
+            )}
 
             <div className="ed-zoom">
               <EditorIcon name="minus" size={14} />

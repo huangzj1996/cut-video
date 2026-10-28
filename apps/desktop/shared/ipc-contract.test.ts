@@ -41,10 +41,16 @@ describe('IPC channel contract', () => {
       'workflow:get-state',
       'workflow:resume',
     ]);
+    expect(Object.values(IPC_CHANNELS.editor).sort()).toEqual(['editor:flush-complete']);
   });
 
   it('registers unique push event channels that do not collide with invoke channels', () => {
-    expect(eventChannels.sort()).toEqual(['chat:message', 'chat:stream', 'workflow:event']);
+    expect(eventChannels.sort()).toEqual([
+      'chat:message',
+      'chat:stream',
+      'editor:flush-request',
+      'workflow:event',
+    ]);
     expect(new Set(eventChannels).size).toBe(eventChannels.length);
 
     for (const channel of eventChannels) {

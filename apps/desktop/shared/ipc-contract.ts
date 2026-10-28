@@ -64,6 +64,8 @@ export interface ProjectCreateInput {
 }
 
 export interface ProjectUpdateInput {
+  /** 编辑器保存时的基线修订号；不匹配返回 PROJECT_STALE_REVISION。 */
+  expectedRevision?: number;
   project: StoredProject;
   projectId: string;
 }
@@ -153,6 +155,7 @@ export type WorkflowArtifactPayload = Record<string, unknown>;
 export interface IpcEventContract {
   'chat:message': ChatMessage;
   'chat:stream': ChatStreamEvent;
+  'editor:flush-request': null;
   'workflow:event': RunEvent;
 }
 
@@ -258,6 +261,10 @@ export interface IpcInvokeContract {
     params: [projectId: string];
     result: { selected: boolean };
   };
+  'editor:flush-complete': {
+    params: [];
+    result: null;
+  };
   'llm:chat': {
     params: [messages: LlmChatMessage[]];
     result: LlmChatResult;
@@ -329,6 +336,9 @@ export const IPC_CHANNELS = {
   llm: {
     chat: 'llm:chat' satisfies IpcChannel,
   },
+  editor: {
+    flushComplete: 'editor:flush-complete' satisfies IpcChannel,
+  },
   chat: {
     list: 'chat:list' satisfies IpcChannel,
     retry: 'chat:retry' satisfies IpcChannel,
@@ -346,6 +356,7 @@ export const IPC_CHANNELS = {
 export const IPC_EVENT_CHANNELS = {
   chatMessage: 'chat:message' satisfies IpcEventChannel,
   chatStream: 'chat:stream' satisfies IpcEventChannel,
+  editorFlushRequest: 'editor:flush-request' satisfies IpcEventChannel,
   workflowEvent: 'workflow:event' satisfies IpcEventChannel,
 } as const;
 
@@ -381,6 +392,12 @@ export interface MiaomaWorkflowApi {
   onEvent(listener: (event: RunEvent) => void): () => void;
 }
 
+/** 关闭窗口前的 flush 握手：主进程请求，渲染进程保存完成后确认。 */
+export interface MiaomaEditorApi {
+  onFlushRequest(listener: () => void): () => void;
+  completeFlush(): Promise<IpcResponse<IpcResult<'editor:flush-complete'>>>;
+}
+
 export interface MiaomaApi {
   ping(): Promise<IpcResponse<IpcResult<'app:ping'>>>;
   getAppInfo(): Promise<IpcResponse<IpcResult<'app:get-info'>>>;
@@ -390,4 +407,5 @@ export interface MiaomaApi {
   llm: MiaomaLlmApi;
   chat: MiaomaChatApi;
   workflow: MiaomaWorkflowApi;
+  editor: MiaomaEditorApi;
 }

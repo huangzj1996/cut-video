@@ -265,11 +265,24 @@ export class ProjectStore {
     return project;
   }
 
+  /**
+   * 保存编辑器文档。
+   *
+   * 传入 `expectedRevision` 时做乐观并发控制：与当前 `contentRevision` 不一致
+   * 直接返回 `PROJECT_STALE_REVISION`，不覆盖别人的新修订。成功保存使
+   * `contentRevision` +1；缺省 `expectedRevision` 时保留旧的直接覆盖行为。
+   */
   update(rawInput: ProjectUpdateInput): StoredProject {
-    const input = rawInput as { project?: unknown; projectId?: unknown } | undefined;
+    const input = rawInput as
+      { expectedRevision?: unknown; project?: unknown; projectId?: unknown } | undefined;
     const projectId = this.parseProjectId(input?.projectId);
     const existing = this.readProject(projectId);
     const rawProject = input?.project;
+    const expectedRevision = this.parseExpectedRevision(input?.expectedRevision);
+
+    if (expectedRevision !== null && existing.project.contentRevision !== expectedRevision) {
+      throw new IpcError('PROJECT_STALE_REVISION', '工程内容已被修改，请重新加载后再保存。');
+    }
 
     if (rawProject === null || typeof rawProject !== 'object') {
       throw new IpcError('PROJECT_INVALID_ARGUMENT', '项目内容无效。');
@@ -292,7 +305,8 @@ export class ProjectStore {
       ...parsed.data,
       project: {
         ...parsed.data.project,
-        contentRevision: existing.project.contentRevision + 1,
+        contentRevision:
+          expectedRevision === null ? existing.project.contentRevision + 1 : expectedRevision + 1,
         createdAt: existing.project.createdAt,
         updatedAt: new Date().toISOString(),
       },
@@ -507,6 +521,18 @@ export class ProjectStore {
         `项目 schemaVersion ${schemaVersion} 与当前应用不兼容。`,
       );
     }
+  }
+
+  private parseExpectedRevision(value: unknown): number | null {
+    if (value === undefined) {
+      return null;
+    }
+
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      throw new IpcError('PROJECT_INVALID_ARGUMENT', '修订号无效。');
+    }
+
+    return value;
   }
 
   private parseProjectId(value: unknown): string {

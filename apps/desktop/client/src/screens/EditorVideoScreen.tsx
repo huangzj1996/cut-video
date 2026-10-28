@@ -8,18 +8,29 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { VideoProject } from '@miaoma/video-project';
+import type { VideoProject, WorkflowRunStatus } from '@miaoma/video-project';
 import { assetUrl } from '../lib/media';
 import { createChatHash } from '../lib/routes';
+import { AutosaveController } from './editor-video/autosave';
+import {
+  canRedoSession,
+  canUndoSession,
+  createEditorSession,
+  editorSessionReducer,
+  isEditorReadOnly,
+  type EditorSessionState,
+} from './editor-video/editor-session';
 import { EditorEmpty, EditorLoading, EditorUnavailable } from './editor-video/EditorStates';
 import {
   loadEditorProject,
+  buildEditorProjectView,
   type EditorLoadResult,
-  type EditorProjectView,
 } from './editor-video/project-view';
 import { parseTimecode } from './editor-video/playback';
 import { PreviewStage } from './editor-video/PreviewStage';
 import { buildPreviewMediaPlan, trackHasClips } from './editor-video/preview-media';
+import type { EditAction } from './editor-video/project-edit';
+import { reorderTargetIndex } from './editor-video/reorder-drag';
 import { createSelection, selectionReducer } from './editor-video/selection';
 import {
   buildEditorTimeline,
@@ -109,12 +120,18 @@ function WaveformPlaceholder() {
 
 type EditorScreenState = EditorLoadResult | { kind: 'loading' };
 
+function isVideoProject(value: unknown): value is VideoProject {
+  return typeof value === 'object' && value !== null && 'ai' in value;
+}
+
 /**
  * 项目级编辑器入口：每次进入都按 projectId 重新读取最新 `project.json`。
+ * 同时读取工作流状态，`running` / `waiting_user` 时编辑器只读。
  * 草稿工程回创作消息页；读取失败或损坏工程停在错误页，可返回工作台。
  */
 export function EditorVideoScreen({ projectId }: { projectId: string }) {
   const [state, setState] = useState<EditorScreenState>({ kind: 'loading' });
+  const [workflowStatus, setWorkflowStatus] = useState<WorkflowRunStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,15 +148,49 @@ export function EditorVideoScreen({ projectId }: { projectId: string }) {
       return;
     }
 
-    void loadEditorProject(reader, projectId).then((result) => {
+    void (async () => {
+      const result = await loadEditorProject(reader, projectId);
+      let status: WorkflowRunStatus | null = null;
+      const workflow = window.miaoma?.workflow;
+
+      if (workflow) {
+        try {
+          const response = await workflow.getState(projectId);
+
+          if (response.ok) {
+            status = response.data?.status ?? null;
+          }
+        } catch {
+          // 工作流状态读取失败时不阻塞编辑器打开，按可编辑处理。
+        }
+      }
+
       if (!cancelled) {
+        setWorkflowStatus(status);
         setState(result);
       }
-    });
+    })();
 
     return () => {
       cancelled = true;
     };
+  }, [projectId]);
+
+  // AI 工作流运行/等待审批的状态可能随时变化，事件里带 status 时同步到编辑器。
+  useEffect(() => {
+    const workflow = window.miaoma?.workflow;
+
+    if (!workflow) {
+      return;
+    }
+
+    const unsubscribe = workflow.onEvent((event) => {
+      if (event.projectId === projectId && event.status) {
+        setWorkflowStatus(event.status);
+      }
+    });
+
+    return unsubscribe;
   }, [projectId]);
 
   useEffect(() => {
@@ -164,11 +215,21 @@ export function EditorVideoScreen({ projectId }: { projectId: string }) {
     return <EditorEmpty message="这个工程还没有分镜，请回到创作消息页生成内容。" />;
   }
 
-  return <EditorWorkspace key={state.view.projectId} project={state.project} view={state.view} />;
+  return (
+    <EditorWorkspace
+      key={state.view.projectId}
+      project={state.project}
+      readonly={isEditorReadOnly(workflowStatus)}
+    />
+  );
 }
 
-function EditorWorkspace({ project, view }: { project: VideoProject; view: EditorProjectView }) {
-  const timeline = useMemo(() => buildEditorTimeline(project), [project]);
+function EditorWorkspace({ project, readonly }: { project: VideoProject; readonly: boolean }) {
+  const [session, sessionDispatch] = useReducer(editorSessionReducer, project, (initialProject) =>
+    createEditorSession(initialProject, { readonly }),
+  );
+  const view = useMemo(() => buildEditorProjectView(session.project), [session.project]);
+  const timeline = useMemo(() => buildEditorTimeline(session.project), [session.project]);
   const spanSeconds = timeline.durationSeconds > 0 ? timeline.durationSeconds : 1;
   const { currentTime, pause, playing, seek, toggle } = usePlaybackClock(timeline.durationSeconds);
   const [selection, dispatch] = useReducer(
@@ -192,23 +253,57 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
   });
   const [notice, setNotice] = useState<string | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [draggingSceneId, setDraggingSceneId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rulerTrackRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const activePointerIdRef = useRef<number | null>(null);
   const grabOffsetRef = useRef(0);
   const noticeTimer = useRef<number | null>(null);
+  const sessionRef = useRef<EditorSessionState>(session);
+  const autosaveRef = useRef<AutosaveController | null>(null);
+  const editSeqRef = useRef(session.editSeq);
+  const suppressClickRef = useRef(false);
+  const dragRef = useRef<{
+    moved: boolean;
+    pointerId: number;
+    sceneId: string;
+    targetIndex: number;
+  } | null>(null);
+
+  sessionRef.current = session;
 
   const selectedScene = view.scenes.find((scene) => scene.id === selection.sceneId);
   const selectedName = selectedScene?.title ?? '未选择分镜';
   const selectedRange = selectedScene?.rangeLabel ?? '—';
   const playheadRatio = Math.min(1, Math.max(0, currentTime / spanSeconds));
   const previewPlan = useMemo(
-    () => buildPreviewMediaPlan(project, currentTime),
-    [currentTime, project],
+    () => buildPreviewMediaPlan(session.project, currentTime),
+    [currentTime, session.project],
   );
-  const hasVoiceTrack = useMemo(() => trackHasClips(project, 'voice'), [project]);
-  const hasMusicTrack = useMemo(() => trackHasClips(project, 'music'), [project]);
+  const hasVoiceTrack = useMemo(() => trackHasClips(session.project, 'voice'), [session.project]);
+  const hasMusicTrack = useMemo(() => trackHasClips(session.project, 'music'), [session.project]);
+  const saveKind =
+    session.saveStatus === 'conflict'
+      ? 'conflict'
+      : session.saveStatus === 'saving'
+        ? 'saving'
+        : session.saveStatus === 'error'
+          ? 'error'
+          : session.dirty
+            ? 'dirty'
+            : 'saved';
+  const saveLabel =
+    session.saveStatus === 'conflict'
+      ? '保存冲突'
+      : session.saveStatus === 'saving'
+        ? '保存中'
+        : session.saveStatus === 'error'
+          ? '保存失败'
+          : session.dirty
+            ? '待保存'
+            : '已保存';
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -229,6 +324,182 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
         window.clearTimeout(noticeTimer.current);
       }
     };
+  }, []);
+
+  // 工作流状态变化时同步只读标记；会话 reducer 负责拒绝只读期间的操作。
+  useEffect(() => {
+    sessionDispatch({ readonly, type: 'readonly-changed' });
+  }, [readonly]);
+
+  /**
+   * 保存当前内存文档。`expectedRevision` 使用文档基线修订号：
+   * 冲突时进入 conflict 状态并停止自动保存，不覆盖别处的新修订。
+   */
+  const persistProject = useCallback(async () => {
+    const current = sessionRef.current;
+
+    if (!current.dirty) {
+      return;
+    }
+
+    const writer = window.miaoma?.project;
+
+    if (!writer) {
+      throw new Error('IPC_UNAVAILABLE');
+    }
+
+    sessionDispatch({ type: 'save-start' });
+
+    const response = await writer.update({
+      expectedRevision: current.contentRevision,
+      project: current.project,
+      projectId: current.project.project.projectId,
+    });
+
+    if (response.ok) {
+      if (!isVideoProject(response.data)) {
+        sessionDispatch({ message: '服务端返回的工程结构无效。', type: 'save-error' });
+        throw new Error('PROJECT_INVALID');
+      }
+
+      sessionDispatch({ project: response.data, savedSeq: current.editSeq, type: 'save-success' });
+      return;
+    }
+
+    if (response.error.code === 'PROJECT_STALE_REVISION') {
+      sessionDispatch({ type: 'save-conflict' });
+      autosaveRef.current?.stop();
+      return;
+    }
+
+    sessionDispatch({ message: response.error.message, type: 'save-error' });
+    throw new Error(response.error.code);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AutosaveController({ save: persistProject });
+
+    autosaveRef.current = controller;
+
+    return () => {
+      controller.stop();
+      autosaveRef.current = null;
+    };
+  }, [persistProject]);
+
+  // 每次成功编辑（含撤销/重做）后重置 2s 防抖窗口。
+  useEffect(() => {
+    if (session.editSeq === editSeqRef.current) {
+      return;
+    }
+
+    editSeqRef.current = session.editSeq;
+    autosaveRef.current?.noteEdit();
+  }, [session.editSeq]);
+
+  useEffect(() => {
+    if (session.lastEditError) {
+      notify(session.lastEditError);
+    }
+  }, [session.lastEditError, notify]);
+
+  useEffect(() => {
+    if (session.lastSaveError) {
+      notify(`保存失败：${session.lastSaveError}`);
+    }
+  }, [session.lastSaveError, notify]);
+
+  useEffect(() => {
+    if (session.saveStatus === 'conflict') {
+      notify('工程已在别处修改，请重新加载后再编辑。');
+    }
+  }, [session.saveStatus, notify]);
+
+  // 关闭窗口前主进程会请求 flush，保存完成后必须回执，否则最多等 2 秒。
+  useEffect(() => {
+    const editor = window.miaoma?.editor;
+
+    if (!editor) {
+      return;
+    }
+
+    const unsubscribe = editor.onFlushRequest(() => {
+      void (async () => {
+        try {
+          await autosaveRef.current?.flush();
+        } catch {
+          // 保存失败也要放行关闭，避免窗口关不掉。
+        }
+
+        try {
+          await editor.completeFlush();
+        } catch {
+          // 主进程可能已经销毁，忽略。
+        }
+      })();
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Ctrl+S 立即保存；Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 撤销重做。
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const editingText = Boolean(target?.closest('input, textarea, [contenteditable="true"]'));
+      const key = event.key.toLowerCase();
+
+      if (key === 's') {
+        event.preventDefault();
+        void autosaveRef.current?.flush();
+        return;
+      }
+
+      if (editingText) {
+        return;
+      }
+
+      if (key === 'z') {
+        event.preventDefault();
+        sessionDispatch({ type: event.shiftKey ? 'redo' : 'undo' });
+      } else if (key === 'y') {
+        event.preventDefault();
+        sessionDispatch({ type: 'redo' });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const reloadProject = useCallback(async () => {
+    const reader = window.miaoma?.project;
+
+    if (!reader) {
+      return;
+    }
+
+    const response = await reader.get(sessionRef.current.project.project.projectId);
+
+    if (!response.ok || !isVideoProject(response.data)) {
+      notify('重新加载失败，请稍后重试。');
+      return;
+    }
+
+    sessionDispatch({ project: response.data, type: 'reload' });
+    autosaveRef.current?.resume();
+    notify('已重新加载最新工程。');
+  }, [notify]);
+
+  const performEdit = useCallback((action: EditAction) => {
+    sessionDispatch({ action, type: 'edit' });
   }, []);
 
   const seekFromClientX = useCallback(
@@ -439,12 +710,111 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     event.stopPropagation();
   };
 
+  const handleClipClick = (clip: TimelineTrackClip) => {
+    // 拖动结束后浏览器仍会派发 click，这里吞掉一次，避免误选中。
+    if (suppressClickRef.current) {
+      return;
+    }
+
+    selectClip(clip);
+  };
+
+  const resetSceneDrag = useCallback(() => {
+    dragRef.current = null;
+    setDraggingSceneId(null);
+    setDropIndex(null);
+  }, []);
+
+  const beginSceneDrag = (event: ReactPointerEvent<HTMLElement>, clip: TimelineTrackClip) => {
+    // 片段上的指针事件不再冒泡到轨道，否则按下视频块会同时拖动播放头。
+    event.stopPropagation();
+
+    if (session.readonly || event.button !== 0 || !clip.sceneId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const currentIndex = Math.max(
+      0,
+      view.scenes.findIndex((scene) => scene.id === clip.sceneId),
+    );
+
+    dragRef.current = {
+      moved: false,
+      pointerId: event.pointerId,
+      sceneId: clip.sceneId,
+      targetIndex: currentIndex,
+    };
+    setDraggingSceneId(clip.sceneId);
+    setDropIndex(currentIndex);
+  };
+
+  const moveSceneDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const rect = rulerTrackRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      return;
+    }
+
+    const target = reorderTargetIndex(
+      view.scenes,
+      drag.sceneId,
+      clientXToTime(event.clientX, rect, spanSeconds),
+    );
+
+    if (target === null) {
+      return;
+    }
+
+    drag.moved = true;
+    drag.targetIndex = target;
+    setDropIndex(target);
+  };
+
+  const endSceneDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const { moved, sceneId, targetIndex } = drag;
+
+    resetSceneDrag();
+
+    if (!moved) {
+      return;
+    }
+
+    suppressClickRef.current = true;
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 0);
+
+    const currentIndex = view.scenes.findIndex((scene) => scene.id === sceneId);
+
+    if (currentIndex >= 0 && currentIndex !== targetIndex) {
+      performEdit({ sceneId, targetIndex, type: 'reorder-scene' });
+    }
+  };
+
+  const dropIndicatorSeconds =
+    dropIndex === null ? null : (view.scenes[dropIndex]?.startSeconds ?? spanSeconds);
+
   const renderTrackClip = (track: EditorTrackView, clip: TimelineTrackClip, index: number) => {
     const selected = isClipSelected(clip);
     const activeClass = selected ? ' is-active' : '';
     const shared = {
       'aria-pressed': selected,
-      onClick: () => selectClip(clip),
+      onClick: () => handleClipClick(clip),
       onPointerDown: clipPointerDown,
       style: clipStyle(clip),
       type: 'button' as const,
@@ -452,14 +822,19 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
 
     if (track.kind === 'video') {
       const tone = videoTone(index);
+      const dragging = draggingSceneId !== null && draggingSceneId === clip.sceneId;
 
       return (
         <button
           key={clip.id}
           {...shared}
-          className={`ed-timeline-clip ed-video-bar${activeClass}`}
+          className={`ed-timeline-clip ed-video-bar${activeClass}${dragging ? ' is-dragging' : ''}`}
           style={{ ...shared.style, background: tone.background, borderColor: tone.border }}
           title={clip.label}
+          onPointerDown={(event) => beginSceneDrag(event, clip)}
+          onPointerMove={moveSceneDrag}
+          onPointerUp={endSceneDrag}
+          onPointerCancel={resetSceneDrag}
         >
           <span className="ed-bar-accent" style={{ background: tone.accent }} />
           <span className="ed-video-name">{clip.label}</span>
@@ -565,6 +940,21 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
         </div>
 
         <div className="ed-topbar-actions">
+          <div
+            className={`ed-save ed-save-${saveKind}`}
+            role="status"
+            aria-live="polite"
+            title={session.lastSaveError ?? undefined}
+          >
+            <span className="ed-save-dot" aria-hidden="true" />
+            <span>{saveLabel}</span>
+            {session.saveStatus === 'conflict' ? (
+              <button className="ed-save-reload" type="button" onClick={() => void reloadProject()}>
+                重新加载
+              </button>
+            ) : null}
+          </div>
+
           <button
             className="ed-export"
             type="button"
@@ -575,6 +965,13 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
           </button>
         </div>
       </header>
+
+      {session.readonly ? (
+        <div className="ed-readonly-banner" role="status">
+          <EditorIcon name="lock" size={14} />
+          AI 工作流正在运行或等待审批，编辑器暂时只读；完成后即可继续编辑。
+        </div>
+      ) : null}
 
       <div className="ed-main">
         <aside className="ed-left" aria-label="文稿字幕">
@@ -850,7 +1247,8 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
                 className="ed-icon-button"
                 type="button"
                 aria-label="撤销"
-                onClick={() => notify('撤销将在 T17 实现。')}
+                disabled={!canUndoSession(session)}
+                onClick={() => sessionDispatch({ type: 'undo' })}
               >
                 <EditorIcon name="undo" size={16} />
               </button>
@@ -858,7 +1256,8 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
                 className="ed-icon-button"
                 type="button"
                 aria-label="重做"
-                onClick={() => notify('重做将在 T17 实现。')}
+                disabled={!canRedoSession(session)}
+                onClick={() => sessionDispatch({ type: 'redo' })}
               >
                 <EditorIcon name="redo" size={16} />
               </button>
@@ -970,6 +1369,15 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
                 <span className="ed-playhead-handle" />
               </div>
             </div>
+
+            {dropIndicatorSeconds !== null ? (
+              <div aria-hidden="true" className="ed-drop-layer">
+                <div
+                  className="ed-drop-indicator"
+                  style={{ left: `${secondsToPercent(dropIndicatorSeconds, spanSeconds)}%` }}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       </section>

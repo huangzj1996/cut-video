@@ -64,6 +64,10 @@ const api: MiaomaApi = {
     getArtifact: (input) => invoke(IPC_CHANNELS.workflow.getArtifact, input),
     onEvent: (listener) => subscribe(IPC_EVENT_CHANNELS.workflowEvent, listener),
   },
+  editor: {
+    completeFlush: () => invoke(IPC_CHANNELS.editor.flushComplete),
+    onFlushRequest: (listener) => subscribe(IPC_EVENT_CHANNELS.editorFlushRequest, listener),
+  },
 };
 
 contextBridge.exposeInMainWorld('miaoma', api);

@@ -133,6 +133,73 @@ describe('ProjectStore', () => {
     ]);
   });
 
+  it('accepts an update whose expectedRevision matches the current revision', () => {
+    const created = store.create({ name: '自动保存项目' });
+    const projectId = created.project.projectId;
+    const current = store.get(projectId);
+
+    const firstSave = store.update({
+      expectedRevision: 0,
+      project: { ...current, project: { ...current.project, name: '第一次保存' } },
+      projectId,
+    });
+
+    expect(firstSave.project.contentRevision).toBe(1);
+
+    const secondSave = store.update({
+      expectedRevision: 1,
+      project: { ...firstSave, project: { ...firstSave.project, name: '第二次保存' } },
+      projectId,
+    });
+
+    expect(secondSave.project.contentRevision).toBe(2);
+    expect(store.get(projectId).project.name).toBe('第二次保存');
+  });
+
+  it('rejects a stale expectedRevision without overwriting the newer revision', () => {
+    const created = store.create({ name: '冲突项目' });
+    const projectId = created.project.projectId;
+    const current = store.get(projectId);
+    const firstSave = store.update({
+      expectedRevision: 0,
+      project: { ...current, project: { ...current.project, name: '别处的新版本' } },
+      projectId,
+    });
+
+    expectIpcError(
+      () =>
+        store.update({
+          expectedRevision: 0,
+          project: { ...current, project: { ...current.project, name: '过期覆盖' } },
+          projectId,
+        }),
+      'PROJECT_STALE_REVISION',
+    );
+
+    const onDisk = store.get(projectId);
+
+    expect(onDisk.project.contentRevision).toBe(firstSave.project.contentRevision);
+    expect(onDisk.project.name).toBe('别处的新版本');
+  });
+
+  it('rejects an invalid expectedRevision', () => {
+    const created = store.create({ name: '无效修订项目' });
+    const projectId = created.project.projectId;
+    const current = store.get(projectId);
+
+    for (const expectedRevision of ['1', -1, 1.5, null]) {
+      expectIpcError(
+        () =>
+          store.update({
+            expectedRevision: expectedRevision as unknown as number,
+            project: current,
+            projectId,
+          }),
+        'PROJECT_INVALID_ARGUMENT',
+      );
+    }
+  });
+
   it('writes and reads creation input', () => {
     const created = store.create({ name: '创作项目' });
 

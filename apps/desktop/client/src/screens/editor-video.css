@@ -1580,3 +1580,114 @@
 .ed-fallback-action:hover {
   filter: brightness(1.08);
 }
+
+/* 保存状态（#6 自动保存）：保存中 / 已保存 / 待保存 / 保存失败 / 冲突 */
+
+.ed-save {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--ed-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ed-text-2);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.ed-save-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ed-muted);
+}
+
+.ed-save-saved .ed-save-dot {
+  background: var(--ed-teal);
+}
+
+.ed-save-dirty .ed-save-dot,
+.ed-save-saving .ed-save-dot {
+  background: var(--ed-amber);
+}
+
+.ed-save-error {
+  border-color: rgba(240, 95, 115, 0.45);
+  color: #ffc7ce;
+}
+
+.ed-save-error .ed-save-dot,
+.ed-save-conflict .ed-save-dot {
+  background: var(--ed-red);
+}
+
+.ed-save-conflict {
+  border-color: rgba(240, 95, 115, 0.6);
+  background: rgba(240, 95, 115, 0.14);
+  color: #ffd7dc;
+}
+
+.ed-save-reload {
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ed-save-reload:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* 工作流运行/等待审批时的只读横幅 */
+
+.ed-readonly-banner {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 20px;
+  border-bottom: 1px solid rgba(246, 184, 75, 0.28);
+  background: rgba(246, 184, 75, 0.1);
+  color: #f6c96b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 拖动视频块重排分镜 */
+
+.ed-timeline-clip.is-dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.ed-icon-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ed-drop-layer {
+  position: absolute;
+  top: 23px;
+  right: 0;
+  bottom: 0;
+  left: 200px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.ed-drop-indicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ed-teal);
+  box-shadow: 0 0 10px rgba(37, 208, 177, 0.9);
+  transform: translateX(-1px);
+}

@@ -16,6 +16,7 @@ import {
 } from '@miaoma/video-project';
 import {
   IPC_CHANNELS,
+  IPC_EVENT_CHANNELS,
   type AppInfo,
   type AppSettings,
   type IpcChannel,
@@ -27,6 +28,7 @@ import {
 } from '../shared/ipc-contract';
 import { ChatService } from './chat/chat-service';
 import { ChatStore } from './chat/chat-store';
+import { CloseFlushCoordinator } from './editor/close-flush';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { registerAssetProtocol, registerAssetScheme } from './media/asset-protocol-handler';
 import { isBinaryAvailable } from './media/binary-check';
@@ -154,6 +156,7 @@ function getProjectStore(): ProjectStore {
 
 let workflowRunManager: WorkflowRunManager | null = null;
 let chatService: ChatService | null = null;
+let activeCloseFlush: CloseFlushCoordinator | null = null;
 
 function getWorkflowRunManager(): WorkflowRunManager {
   if (workflowRunManager) {
@@ -260,6 +263,12 @@ function registerIpcHandlers(): void {
   handle(IPC_CHANNELS.project.get, (projectId) => getProjectStore().get(projectId));
   handle(IPC_CHANNELS.project.update, (input) => getProjectStore().update(input));
   handle(IPC_CHANNELS.project.delete, (projectId) => getProjectStore().delete(projectId));
+
+  // 渲染进程完成关闭前的保存后确认；主进程最多等 2 秒。
+  handle(IPC_CHANNELS.editor.flushComplete, () => {
+    activeCloseFlush?.complete();
+    return null;
+  });
 
   handle(IPC_CHANNELS.project.selectAssets, async (projectId) => {
     const id = assertProjectId(projectId);
@@ -455,6 +464,37 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+  });
+
+  // 关窗前先让渲染进程 flush 未保存编辑；最多等 2 秒，超时直接销毁窗口。
+  const closeFlush = new CloseFlushCoordinator({
+    requestFlush: () => {
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_EVENT_CHANNELS.editorFlushRequest, null);
+      }
+    },
+  });
+
+  activeCloseFlush = closeFlush;
+
+  mainWindow.on('close', (event) => {
+    if (mainWindow.isDestroyed()) {
+      return;
+    }
+
+    event.preventDefault();
+
+    void closeFlush.begin().then(() => {
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.destroy();
+      }
+    });
+  });
+
+  mainWindow.on('closed', () => {
+    if (activeCloseFlush === closeFlush) {
+      activeCloseFlush = null;
+    }
   });
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

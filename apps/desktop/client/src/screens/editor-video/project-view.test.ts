@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { StoredProject, VideoProject } from '@miaoma/video-project';
+import type { Scene, StoredProject, VideoProject } from '@miaoma/video-project';
 import type { IpcResponse } from '../../../../shared/ipc-contract';
 import {
   buildEditorProjectView,
@@ -263,6 +263,120 @@ describe('buildEditorProjectView', () => {
     expect(view.sceneCount).toBe(0);
     expect(view.scenes).toEqual([]);
     expect(view.totalDurationLabel).toBe('00:00');
+  });
+});
+
+describe('scene context card', () => {
+  function withSceneOverrides(
+    project: VideoProject,
+    overrides: Record<string, Partial<Scene>>,
+  ): VideoProject {
+    return {
+      ...project,
+      scenes: project.scenes.map((scene) => ({ ...scene, ...overrides[scene.id] })),
+    };
+  }
+
+  it('binds the context title, range, script and analysis to each scene', () => {
+    const view = buildEditorProjectView(VIDEO_PROJECT, NOW_MS);
+
+    expect(view.scenes[0]).toMatchObject({
+      analysis: '办公室',
+      heading: '开场',
+      rangeLabel: '00:00-00:04',
+      script: '第一段文稿',
+    });
+    expect(view.scenes[1]).toMatchObject({
+      analysis: '街景',
+      heading: '收尾',
+      rangeLabel: '00:04-00:10',
+      script: '第二段文稿',
+    });
+  });
+
+  it('joins visual intent and notes in the analysis paragraph', () => {
+    const project = withSceneOverrides(VIDEO_PROJECT, {
+      'scene-1': { notes: '补充说明', visualIntent: '办公室' },
+    });
+
+    expect(buildEditorProjectView(project, NOW_MS).scenes[0]?.analysis).toBe('办公室\n补充说明');
+  });
+
+  it('hides the analysis paragraph when visual intent and notes are both blank', () => {
+    const project = withSceneOverrides(VIDEO_PROJECT, {
+      'scene-1': { notes: '   ', visualIntent: '' },
+    });
+    const view = buildEditorProjectView(project, NOW_MS);
+
+    expect(view.scenes[0]?.analysis).toBeNull();
+  });
+
+  it('builds video, voice and creation tags that follow the selected scene', () => {
+    const project = withSceneOverrides(VIDEO_PROJECT, {
+      'scene-1': { matchedVideoAssetIds: ['video-1', 'video-missing'] },
+      'scene-2': { matchedVideoAssetIds: [] },
+    });
+    const withVoiceChange: VideoProject = {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.kind === 'voice'
+          ? {
+              ...track,
+              clips: track.clips.map((clip) =>
+                clip.sceneId === 'scene-2' ? { ...clip, voicePreset: 'xinwen-bobao' } : clip,
+              ),
+            }
+          : track,
+      ),
+    };
+    const view = buildEditorProjectView(withVoiceChange, NOW_MS);
+
+    expect(view.scenes[0]?.tags).toEqual([
+      { label: '视频画面', value: '智能匹配素材 · 1 段（1 个缺失）' },
+      { label: '旁白配音', value: '温婉学姐（模拟）' },
+      { label: '创作倾向', value: 'AI 智能创作（默认）' },
+    ]);
+    expect(view.scenes[1]?.tags).toEqual([
+      { label: '视频画面', value: '智能匹配素材 · 未匹配' },
+      { label: '旁白配音', value: '新闻播报（模拟）' },
+      { label: '创作倾向', value: 'AI 智能创作（默认）' },
+    ]);
+  });
+
+  it('reports a missing voice asset instead of inventing a voice name', () => {
+    const project: VideoProject = {
+      ...VIDEO_PROJECT,
+      assets: { ...VIDEO_PROJECT.assets, voices: [] },
+    };
+
+    expect(buildEditorProjectView(project, NOW_MS).scenes[0]?.tags[1]).toEqual({
+      label: '旁白配音',
+      value: '配音缺失',
+    });
+  });
+
+  it('reports a scene without a voice clip as not generated', () => {
+    const project: VideoProject = {
+      ...VIDEO_PROJECT,
+      tracks: VIDEO_PROJECT.tracks.map((track) =>
+        track.kind === 'voice'
+          ? { ...track, clips: track.clips.filter((clip) => clip.sceneId !== 'scene-1') }
+          : track,
+      ),
+    };
+
+    expect(buildEditorProjectView(project, NOW_MS).scenes[0]?.tags[1]).toEqual({
+      label: '旁白配音',
+      value: '未生成配音',
+    });
+  });
+
+  it('keeps the creation tendency on the v1 fixed mode for every scene', () => {
+    const view = buildEditorProjectView(VIDEO_PROJECT, NOW_MS);
+
+    for (const scene of view.scenes) {
+      expect(scene.tags[2]).toEqual({ label: '创作倾向', value: 'AI 智能创作（默认）' });
+    }
   });
 });
 

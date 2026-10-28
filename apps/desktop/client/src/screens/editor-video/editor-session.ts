@@ -98,6 +98,14 @@ export function isEditorReadOnly(status: WorkflowRunStatus | null): boolean {
   return status === 'running' || status === 'waiting_user';
 }
 
+/**
+ * 只读或保存冲突时不得写盘：前者由工作流独占工程，后者写回会覆盖别处的新修订。
+ * UI 的手动保存、自动保存与关窗 flush 都先过这一关。
+ */
+export function canSaveSession(state: EditorSessionState): boolean {
+  return !state.readonly && state.saveStatus !== 'conflict';
+}
+
 export function editorSessionReducer(
   state: EditorSessionState,
   action: EditorSessionAction,

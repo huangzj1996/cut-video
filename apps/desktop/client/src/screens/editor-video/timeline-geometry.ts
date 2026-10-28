@@ -35,6 +35,8 @@ export interface TimelineTrackClip {
   kind: EditorTrackKind;
   label: string;
   loop?: boolean;
+  /** 片段引用的素材未登记在工程 assets 中：时间线显示"缺失"标记，不重新定位。 */
+  missing?: boolean;
   sceneId?: string;
   /** 音乐 source 区间（毫秒）；配音/字幕没有裁剪过的 source 区间。 */
   sourceEndMs?: number;
@@ -148,6 +150,7 @@ function buildVideoClips(project: VideoProject, scenesById: Map<string, Scene>) 
       id: clip.id,
       kind: 'video',
       label: sceneLabel(scene, index + 1),
+      missing: asset === undefined,
       ...(clip.sceneId ? { sceneId: clip.sceneId } : {}),
       startSeconds: seconds(clip.startMs),
       thumbnailIds,
@@ -169,6 +172,7 @@ function buildVoiceClips(project: VideoProject, scenesById: Map<string, Scene>) 
       id: clip.id,
       kind: 'voice',
       label: scene ? `配音 ${padIndex(scene.index)}` : `配音 ${padIndex(index + 1)}`,
+      missing: asset === undefined,
       ...(clip.sceneId ? { sceneId: clip.sceneId } : {}),
       startSeconds: seconds(clip.startMs),
       ...(asset?.isMock ? { badge: '模拟' } : {}),
@@ -205,6 +209,7 @@ function buildMusicClips(project: VideoProject) {
       kind: 'music',
       label: asset?.title ?? '音乐',
       loop: clip.loop ?? false,
+      missing: asset === undefined,
       sourceEndMs: clip.sourceEndMs,
       sourceStartMs: clip.sourceStartMs,
       startSeconds: seconds(clip.startMs),
@@ -264,6 +269,50 @@ export function buildEditorTimeline(project: VideoProject): EditorTimeline {
       },
     ],
   };
+}
+
+export interface MissingMediaMarker {
+  assetId: string;
+  kind: 'video' | 'voice' | 'music';
+  message: string;
+}
+
+const MISSING_MEDIA_LABELS: Record<MissingMediaMarker['kind'], string> = {
+  music: '音乐',
+  video: '视频',
+  voice: '配音',
+};
+
+/**
+ * 汇总工程里所有缺失素材（不依赖播放头位置），供预览层持续显示"缺失"占位；
+ * 同一个素材被多个片段引用时只提示一次。
+ */
+export function collectMissingMedia(timeline: EditorTimeline): MissingMediaMarker[] {
+  const markers = new Map<string, MissingMediaMarker>();
+
+  for (const track of timeline.tracks) {
+    if (track.kind === 'subtitle') {
+      continue;
+    }
+
+    for (const clip of track.clips) {
+      if (!clip.missing) {
+        continue;
+      }
+
+      const key = `${track.kind}:${clip.assetId}`;
+
+      if (!markers.has(key)) {
+        markers.set(key, {
+          assetId: clip.assetId,
+          kind: track.kind,
+          message: `${MISSING_MEDIA_LABELS[track.kind]}素材缺失：${clip.label}`,
+        });
+      }
+    }
+  }
+
+  return [...markers.values()];
 }
 
 export function clampZoom(value: number): number {

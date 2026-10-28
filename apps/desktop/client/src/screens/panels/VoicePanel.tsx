@@ -1,11 +1,11 @@
-import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { EditorIcon } from '../editor-icons';
 import './voice-panel.css';
 
-interface VoicePanelProps {
-  onNotify?: (message: string) => void;
-}
+/**
+ * 口播面板首版保持 mock：只展示音色与参数，所有写操作禁用并标注"后续"，
+ * 不发起真实试听或生成请求。
+ */
 
 interface VoiceOption {
   id: string;
@@ -19,6 +19,10 @@ const VOICE_OPTIONS: readonly VoiceOption[] = [
   { id: 'xinwen', name: '新闻播报', description: '稳重正式' },
   { id: 'huoli', name: '活力讲解', description: '节奏明快' },
 ];
+
+const CURRENT_VOICE_ID = 'wenwan';
+const VOLUME = 82;
+const SPEED = 1.05;
 
 function SpeedIcon() {
   return (
@@ -40,28 +44,17 @@ function SpeedIcon() {
   );
 }
 
-export function VoicePanel({ onNotify }: VoicePanelProps) {
-  const [selectedVoice, setSelectedVoice] = useState('wenwan');
-  const [previewing, setPreviewing] = useState<string | null>(null);
-  const [volume, setVolume] = useState(82);
-  const [speed, setSpeed] = useState(1.05);
-
-  const selectVoice = (id: string) => {
-    setSelectedVoice(id);
-    setPreviewing(null);
-  };
-
-  const togglePreview = (id: string, name: string) => {
-    setPreviewing((current) => (current === id ? null : id));
-    onNotify?.(`正在试听「${name}」；真实试听将在 T12 接入。`);
-  };
-
+export function VoicePanel() {
   return (
     <div className="ed-panel ed-voice-panel">
       <div className="ed-voice-scroll">
         <header className="ed-voice-header">
           <h2 className="ed-voice-title">口播配音</h2>
           <p className="ed-voice-subtitle">为当前分镜生成旁白音轨</p>
+          <p className="ed-panel-followup" role="note">
+            <span className="ed-followup-chip">后续</span>
+            本轮只读：音色、试听与生成将在后续版本开放。
+          </p>
         </header>
 
         <section className="ed-voice-card">
@@ -72,27 +65,14 @@ export function VoicePanel({ onNotify }: VoicePanelProps) {
 
           <div className="ed-voice-grid">
             {VOICE_OPTIONS.map((voice) => {
-              const selected = voice.id === selectedVoice;
-              const preview = previewing === voice.id;
+              const selected = voice.id === CURRENT_VOICE_ID;
 
               return (
                 <div
                   key={voice.id}
-                  className={`ed-voice-option${selected ? ' is-selected' : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={selected}
-                  onClick={() => selectVoice(voice.id)}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) {
-                      return;
-                    }
-
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      selectVoice(voice.id);
-                    }
-                  }}
+                  className={`ed-voice-option is-disabled${selected ? ' is-selected' : ''}`}
+                  aria-disabled="true"
+                  title="音色选择将在后续版本开放"
                 >
                   <span className="ed-voice-option-copy">
                     <span className="ed-voice-option-name">{voice.name}</span>
@@ -101,13 +81,11 @@ export function VoicePanel({ onNotify }: VoicePanelProps) {
                   <button
                     className="ed-voice-preview"
                     type="button"
-                    aria-label={preview ? `停止试听 ${voice.name}` : `试听 ${voice.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      togglePreview(voice.id, voice.name);
-                    }}
+                    disabled
+                    aria-label={`试听 ${voice.name}（后续版本开放）`}
+                    title="试听将在后续版本开放"
                   >
-                    <EditorIcon name={preview ? 'pause' : 'play'} size={12} />
+                    <EditorIcon name="play" size={12} />
                   </button>
                 </div>
               );
@@ -118,7 +96,8 @@ export function VoicePanel({ onNotify }: VoicePanelProps) {
             <button
               className="ed-voice-custom-button"
               type="button"
-              onClick={() => onNotify?.('自定义音色库上传将在 T12 接入。')}
+              disabled
+              title="自定义音色库将在后续版本开放"
             >
               <EditorIcon name="plus" size={16} />
               自定义音色库
@@ -136,17 +115,18 @@ export function VoicePanel({ onNotify }: VoicePanelProps) {
                 <EditorIcon name="volume" size={16} />
               </span>
               <span className="ed-voice-param-label">音量</span>
-              <span className="ed-voice-param-value">{volume}%</span>
+              <span className="ed-voice-param-value">{VOLUME}%</span>
             </div>
             <input
               className="ed-voice-slider"
               type="range"
               min={0}
               max={100}
-              value={volume}
-              aria-label="音量"
-              style={{ '--range-progress': `${volume}%` } as CSSProperties}
-              onChange={(event) => setVolume(Number(event.target.value))}
+              value={VOLUME}
+              disabled
+              aria-label="音量（后续版本开放）"
+              title="音量调整将在后续版本开放"
+              style={{ '--range-progress': `${VOLUME}%` } as CSSProperties}
             />
           </div>
 
@@ -156,7 +136,7 @@ export function VoicePanel({ onNotify }: VoicePanelProps) {
                 <SpeedIcon />
               </span>
               <span className="ed-voice-param-label">语速</span>
-              <span className="ed-voice-param-value">{speed.toFixed(2)}x</span>
+              <span className="ed-voice-param-value">{SPEED.toFixed(2)}x</span>
             </div>
             <input
               className="ed-voice-slider"
@@ -164,10 +144,11 @@ export function VoicePanel({ onNotify }: VoicePanelProps) {
               min={0.5}
               max={2}
               step={0.05}
-              value={speed}
-              aria-label="语速"
-              style={{ '--range-progress': `${((speed - 0.5) / 1.5) * 100}%` } as CSSProperties}
-              onChange={(event) => setSpeed(Number(event.target.value))}
+              value={SPEED}
+              disabled
+              aria-label="语速（后续版本开放）"
+              title="语速调整将在后续版本开放"
+              style={{ '--range-progress': `${((SPEED - 0.5) / 1.5) * 100}%` } as CSSProperties}
             />
           </div>
         </section>
@@ -177,7 +158,8 @@ export function VoicePanel({ onNotify }: VoicePanelProps) {
         <button
           className="ed-voice-generate"
           type="button"
-          onClick={() => onNotify?.('口播生成将在 T12 接入。')}
+          disabled
+          title="口播生成将在后续版本开放"
         >
           <EditorIcon name="mic" size={15} />
           生成口播音轨

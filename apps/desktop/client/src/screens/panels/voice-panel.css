@@ -109,6 +109,16 @@
   background: rgba(240, 95, 115, 0.2);
 }
 
+/* mock 音色卡：只展示，不响应点击 */
+.ed-voice-option.is-disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.ed-voice-option.is-disabled:hover {
+  border-color: #2a2f38;
+}
+
 .ed-voice-option-copy {
   display: flex;
   flex-direction: column;

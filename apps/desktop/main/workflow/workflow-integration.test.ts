@@ -23,13 +23,9 @@ import { desktopPromptProvider } from './prompts';
 import { WorkflowRunManager } from './run-manager';
 
 const FFMPEG =
-  process.platform === 'win32'
-    ? path.resolve('resources/ffmpeg/ffmpeg.exe')
-    : 'ffmpeg';
+  process.platform === 'win32' ? path.resolve('resources/ffmpeg/ffmpeg.exe') : 'ffmpeg';
 const FFPROBE =
-  process.platform === 'win32'
-    ? path.resolve('resources/ffmpeg/ffprobe.exe')
-    : 'ffprobe';
+  process.platform === 'win32' ? path.resolve('resources/ffmpeg/ffprobe.exe') : 'ffprobe';
 
 function canRun(binary: string): boolean {
   return spawnSync(binary, ['-version'], { windowsHide: true }).status === 0;

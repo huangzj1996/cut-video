@@ -120,6 +120,8 @@ function analyzeItem(item: AssetManifestItem): AnalyzedAsset {
       durationLabel: durationText,
       hasAudio: probe.hasAudio,
       isVfr: probe.isVfr,
+      ...(probe.codec !== undefined ? { codec: probe.codec } : {}),
+      ...(probe.isHdr !== undefined ? { isHdr: probe.isHdr } : {}),
     },
     status: 'analyzed',
   };

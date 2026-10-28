@@ -54,6 +54,9 @@ function buildVideoAssets(input: AssembleTimelineInput): {
     width: asset.width,
     height: asset.height,
     ...(asset.mediaType === 'video' ? { fps: asset.fps ?? 30 } : {}),
+    ...(asset.technical.codec !== undefined ? { codec: asset.technical.codec } : {}),
+    ...(asset.technical.isHdr !== undefined ? { isHdr: asset.technical.isHdr } : {}),
+    isVfr: asset.technical.isVfr,
     thumbnailIds: asset.keyframes
       .map((frame) => frame.thumbnailId)
       .filter((id) => thumbnailsById.has(id)),

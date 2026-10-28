@@ -164,6 +164,9 @@ export async function prepareProjectAssets(
       path: candidate.path,
       thumbnailIds: [],
       width: metadata.width,
+      ...(metadata.codec !== undefined ? { codec: metadata.codec } : {}),
+      isHdr: metadata.isHdr,
+      isVfr: metadata.isVfr,
     });
   }
 

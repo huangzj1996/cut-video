@@ -5,6 +5,7 @@ export type EditorIconName =
   | 'play'
   | 'pause'
   | 'volume'
+  | 'volume-off'
   | 'expand'
   | 'image'
   | 'mic'
@@ -55,6 +56,13 @@ const ICON_NODES: Record<EditorIconName, ReactNode> = {
       <path d="M4 9v6h4l5 4V5L8 9H4z" />
       <path d="M17 9a4 4 0 0 1 0 6" />
       <path d="M19.5 6.5a7.5 7.5 0 0 1 0 11" />
+    </>
+  ),
+  'volume-off': (
+    <>
+      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+      <path d="m17 9 5 5" />
+      <path d="m22 9-5 5" />
     </>
   ),
   expand: (

@@ -260,7 +260,11 @@ interface FakeMediaElement {
 }
 
 /** 预览层用到的媒体元素属性集合；假元素让三类媒体可以被一起断言。 */
-function createFakeMediaElement(currentTime: number, loadedAssetId: string): FakeMediaElement {
+function createFakeMediaElement(
+  currentTime: number,
+  loadedAssetId: string,
+  paused = true,
+): FakeMediaElement {
   return {
     currentTime,
     dataset: { assetId: loadedAssetId },
@@ -269,7 +273,7 @@ function createFakeMediaElement(currentTime: number, loadedAssetId: string): Fak
     pause() {
       this.paused = true;
     },
-    paused: true,
+    paused,
     play() {
       this.paused = false;
 
@@ -554,11 +558,11 @@ describe('preview seek alignment', () => {
   it('lands video, voice, and music on their mapped source times from one paused seek', () => {
     const plan = buildPreviewMediaPlan(makeProject(), 2);
 
-    // 三类媒体都已经加载好当前素材，模拟播放中暂停在 2s 后的统一 seek。
+    // 三类媒体都在播放，模拟播放中暂停后的一次统一 seek。
     const videoPlan = plan.video!;
-    const video = createFakeMediaElement(0, 'video-1');
-    const voice = createFakeMediaElement(0, 'voice-1');
-    const music = createFakeMediaElement(0, 'music-1');
+    const video = createFakeMediaElement(0, 'video-1', false);
+    const voice = createFakeMediaElement(0, 'voice-1', false);
+    const music = createFakeMediaElement(0, 'music-1', false);
 
     // 与 PreviewStage 相同：活动视频先应用倍速，再对齐 source 时间。
     video.playbackRate = videoPlan.playbackRate;

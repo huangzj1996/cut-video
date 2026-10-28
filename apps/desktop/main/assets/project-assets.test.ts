@@ -64,9 +64,12 @@ describe('prepareProjectAssets', () => {
 
     expect(prepared.assets.videos).toHaveLength(1);
     expect(prepared.assets.videos[0]).toMatchObject({
+      codec: 'h264',
       durationMs: 5000,
       fps: 30,
       height: 1080,
+      isHdr: false,
+      isVfr: false,
       mediaType: 'video',
       path: video,
       thumbnailIds: [],
@@ -87,6 +90,8 @@ describe('prepareProjectAssets', () => {
     expect(videoItem?.probe).toMatchObject({
       codec: 'h264',
       durationMs: 5000,
+      isHdr: false,
+      isVfr: false,
       rotation: 0,
     });
     expect(videoItem && 'probeError' in videoItem).toBe(false);

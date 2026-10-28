@@ -21,6 +21,17 @@
 
 在 worktree 里读相关代码、组件、测试，弄清现有实现和约定。**先看清楚再动手**。
 
+## 接手已有分支（分支上已有提交时）
+
+如果 `git -C {{WORKTREE}} log {{BASE_BRANCH}}..{{BRANCH}} --oneline` 不是空的，说明这张票之前已经有人做过：
+
+1. 先读懂已有提交：`git log --oneline {{BASE_BRANCH}}..{{BRANCH}}` 与 `git diff --stat {{BASE_BRANCH}}...{{BRANCH}}`。
+2. 把 issue 的验收标准**逐条**对照现有实现与测试，分类：已满足 / 部分满足 / 未实现。
+3. **只补缺口**，不要重写已通过测试的实现；已有测试是基线，不能删除或弱化。
+4. 已有的重构保持原样，除非它直接阻碍验收标准。
+5. 最终报告里给出"验收标准对照表"：逐条 ✅/⚠️/❌ + 证据（文件/测试名）。
+6. 必须在真实工程里点界面才能确认的条目，标注"需人工验证"，不要声称已经验证。
+
 ## 第三步：实现（TDD）
 
 - 用 `skill` 工具加载 `tdd` 技能，按其红-绿-重构循环推进。
@@ -33,6 +44,8 @@
 # 在 {{WORKTREE}} 下
 pnpm typecheck
 pnpm test
+pnpm lint
+pnpm format:check
 ```
 
 如果全量测试太慢，至少跑改动包的 `pnpm --filter @miaoma/<包名> typecheck` 和 `pnpm --filter @miaoma/<包名> test`，

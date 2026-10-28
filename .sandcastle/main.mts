@@ -1,7 +1,7 @@
 // Parallel Planner with Review — four-phase orchestration loop
 //
 // This template drives a multi-phase workflow:
-//   Phase 1 (Plan):             An opus agent analyzes open issues, builds a
+//   Phase 1 (Plan):             A planner agent analyzes open issues, builds a
 //                               dependency graph, and outputs a <plan> JSON
 //                               listing unblocked issues with branch names.
 //   Phase 2 (Execute + Review): For each issue, a sandbox is created via
@@ -41,7 +41,7 @@ const planSchema = z.object({
 
 // Maximum number of plan→execute→merge cycles before stopping.
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
-const MAX_ITERATIONS = 100;
+const MAX_ITERATIONS = 10;
 
 // The sandbox runs Linux while the host may be Windows/macOS, so the host's
 // node_modules cannot be copied in: native binaries (esbuild, electron) would
@@ -76,8 +76,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   // Phase 1: Plan
   //
-  // The planning agent (opus, for deeper reasoning) reads the open issue list,
-  // builds a dependency graph, and selects the issues that can be worked in
+  // The planning agent reads the open issue list, builds a dependency graph,
+  // and selects the issues that can be worked in
   // parallel right now (i.e., no blocking dependencies on other open issues).
   //
   // It outputs a <plan> JSON block — Output.object parses and validates it.
@@ -89,7 +89,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // One iteration is enough: the planner just needs to read and reason,
     // not write code. (Structured output requires maxIterations: 1.)
     maxIterations: 1,
-    // Planner model; adjust to whatever your gateway exposes.
+    // All agents use DeepSeek via the Anthropic-compatible gateway configured
+    // in .sandcastle/.env (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN).
     agent: sandcastle.claudeCode("deepseek-flash"),
     promptFile: "./.sandcastle/plan-prompt.md",
     // Extract and validate the <plan> JSON into a typed object. Throws

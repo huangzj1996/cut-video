@@ -15,6 +15,18 @@ function reorder(sceneId: string, targetIndex: number): EditorSessionAction {
   return { action: { sceneId, targetIndex, type: 'reorder-scene' }, type: 'edit' };
 }
 
+function trim(clipId: string, deltaMs: number): EditorSessionAction {
+  return { action: { clipId, deltaMs, type: 'trim-video' }, type: 'edit' };
+}
+
+function split(atMs: number): EditorSessionAction {
+  return { action: { atMs, type: 'split-video' }, type: 'edit' };
+}
+
+function deleteClip(clipId: string): EditorSessionAction {
+  return { action: { clipId, type: 'delete-clip' }, type: 'edit' };
+}
+
 function reduce(state: EditorSessionState, ...actions: EditorSessionAction[]): EditorSessionState {
   return actions.reduce(editorSessionReducer, state);
 }
@@ -123,6 +135,39 @@ describe('editor session editing', () => {
 
     expect(locked.readonly).toBe(true);
     expect(unlocked.readonly).toBe(false);
+  });
+});
+
+describe('editor session structural edits', () => {
+  it('applies a video trim to the document and records it for undo', () => {
+    const initial = createEditorSession(createEditingProject());
+    const trimmed = reduce(initial, trim('clip-video-1', -1_000));
+
+    expect(trimmed.project.scenes.find((scene) => scene.id === 'scene-1')?.durationMs).toBe(3_000);
+    expect(trimmed.dirty).toBe(true);
+    expect(trimmed.lastEditError).toBeNull();
+    expect(canUndoSession(trimmed)).toBe(true);
+
+    const undone = reduce(trimmed, { type: 'undo' });
+
+    expect(undone.project).toEqual(initial.project);
+  });
+
+  it('applies a split at the playhead through the session reducer', () => {
+    const session = reduce(createEditorSession(createEditingProject()), split(2_000));
+    const videoTrack = session.project.tracks.find((track) => track.kind === 'video');
+
+    expect(videoTrack?.clips).toHaveLength(4);
+    expect(session.project.scenes.find((scene) => scene.id === 'scene-1')?.durationMs).toBe(4_000);
+  });
+
+  it('keeps the document untouched and surfaces the message when deleting a video clip is blocked', () => {
+    const initial = createEditorSession(createEditingProject());
+    const session = reduce(initial, deleteClip('clip-video-1'));
+
+    expect(session.project).toBe(initial.project);
+    expect(session.dirty).toBe(false);
+    expect(session.lastEditError).toContain('创作消息页');
   });
 });
 

@@ -256,6 +256,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [draggingSceneId, setDraggingSceneId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [trimPreview, setTrimPreview] = useState<{ clipId: string; deltaMs: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rulerTrackRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -263,9 +264,19 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   const grabOffsetRef = useRef(0);
   const noticeTimer = useRef<number | null>(null);
   const sessionRef = useRef<EditorSessionState>(session);
+  const selectionRef = useRef(selection);
   const autosaveRef = useRef<AutosaveController | null>(null);
   const editSeqRef = useRef(session.editSeq);
   const suppressClickRef = useRef(false);
+  const trimRef = useRef<{
+    clipId: string;
+    deltaMs: number;
+    maxDeltaMs: number;
+    minDeltaMs: number;
+    pointerId: number;
+    startClientX: number;
+    widthPx: number;
+  } | null>(null);
   const dragRef = useRef<{
     moved: boolean;
     pointerId: number;
@@ -274,6 +285,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   } | null>(null);
 
   sessionRef.current = session;
+  selectionRef.current = selection;
 
   const selectedScene = view.scenes.find((scene) => scene.id === selection.sceneId);
   const selectedName = selectedScene?.title ?? '未选择分镜';
@@ -289,6 +301,29 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   );
   const hasVoiceTrack = useMemo(() => trackHasClips(session.project, 'voice'), [session.project]);
   const hasMusicTrack = useMemo(() => trackHasClips(session.project, 'music'), [session.project]);
+  // 分镜锁定模型下只有分镜末尾的视频片段能改变分镜时长，只有它显示右边缘裁剪手柄。
+  const trailingVideoClipIds = useMemo(() => {
+    const sceneEnds = new Map<string, number>();
+    let cursorMs = 0;
+
+    for (const scene of session.project.scenes
+      .slice()
+      .sort((left, right) => left.index - right.index)) {
+      cursorMs += scene.durationMs;
+      sceneEnds.set(scene.id, cursorMs);
+    }
+
+    const ids = new Set<string>();
+    const videoTrack = session.project.tracks.find((track) => track.kind === 'video');
+
+    for (const clip of videoTrack?.clips ?? []) {
+      if (clip.sceneId && sceneEnds.get(clip.sceneId) === clip.endMs) {
+        ids.add(clip.id);
+      }
+    }
+
+    return ids;
+  }, [session.project]);
   const saveKind =
     session.saveStatus === 'conflict'
       ? 'conflict'
@@ -335,6 +370,13 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
   useEffect(() => {
     sessionDispatch({ readonly, type: 'readonly-changed' });
   }, [readonly]);
+
+  // 缩短分镜会让项目总时长变小；播放头不能停在时间线之外。
+  useEffect(() => {
+    if (currentTime > timeline.durationSeconds) {
+      seek(timeline.durationSeconds);
+    }
+  }, [currentTime, seek, timeline.durationSeconds]);
 
   /**
    * 保存当前内存文档。`expectedRevision` 使用文档基线修订号：
@@ -447,16 +489,36 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     return unsubscribe;
   }, []);
 
-  // Ctrl+S 立即保存；Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 撤销重做。
+  // Delete 删除选中片段（视频/配音会被拒绝并提示）；Ctrl+S 保存；Ctrl+Z/Y 撤销重做。
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) {
-        return;
-      }
-
       const target = event.target as HTMLElement | null;
       const editingText = Boolean(target?.closest('input, textarea, [contenteditable="true"]'));
       const key = event.key.toLowerCase();
+
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !editingText) {
+        event.preventDefault();
+
+        const current = selectionRef.current;
+
+        if (current.clip) {
+          sessionDispatch({
+            action: { clipId: current.clip.id, type: 'delete-clip' },
+            type: 'edit',
+          });
+        } else if (current.sceneId) {
+          sessionDispatch({
+            action: { sceneId: current.sceneId, type: 'remove-scene' },
+            type: 'edit',
+          });
+        }
+
+        return;
+      }
+
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
 
       if (key === 's') {
         event.preventDefault();
@@ -811,6 +873,80 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     }
   };
 
+  const beginTrimDrag = (event: ReactPointerEvent<HTMLElement>, clip: TimelineTrackClip) => {
+    event.stopPropagation();
+
+    if (session.readonly || event.button !== 0) {
+      return;
+    }
+
+    const rect = rulerTrackRef.current?.getBoundingClientRect();
+
+    if (!rect || rect.width <= 0) {
+      return;
+    }
+
+    event.preventDefault();
+    pause();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const clipDurationMs = Math.round((clip.endSeconds - clip.startSeconds) * 1_000);
+
+    trimRef.current = {
+      clipId: clip.id,
+      deltaMs: 0,
+      // 缩短至少保留 1ms；延长没有上游时长限制，source 不足由 applyEdit 拒绝。
+      maxDeltaMs: 60_000,
+      minDeltaMs: -Math.max(1, clipDurationMs - 1),
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      widthPx: rect.width,
+    };
+    setTrimPreview({ clipId: clip.id, deltaMs: 0 });
+  };
+
+  const moveTrimDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = trimRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const rawDeltaMs = Math.round(
+      ((event.clientX - drag.startClientX) / drag.widthPx) * spanSeconds * 1_000,
+    );
+
+    drag.deltaMs = Math.min(drag.maxDeltaMs, Math.max(drag.minDeltaMs, rawDeltaMs));
+    setTrimPreview({ clipId: drag.clipId, deltaMs: drag.deltaMs });
+  };
+
+  const endTrimDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = trimRef.current;
+
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const { clipId, deltaMs } = drag;
+
+    trimRef.current = null;
+    setTrimPreview(null);
+
+    if (deltaMs !== 0) {
+      performEdit({ clipId, deltaMs, type: 'trim-video' });
+    }
+  };
+
+  const cancelTrimDrag = () => {
+    trimRef.current = null;
+    setTrimPreview(null);
+  };
+
+  const splitAtPlayhead = () => {
+    pause();
+    performEdit({ atMs: Math.round(currentTime * 1_000), type: 'split-video' });
+  };
+
   const dropIndicatorSeconds =
     dropIndex === null ? null : (view.scenes[dropIndex]?.startSeconds ?? spanSeconds);
 
@@ -828,13 +964,27 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
     if (track.kind === 'video') {
       const tone = videoTone(index);
       const dragging = draggingSceneId !== null && draggingSceneId === clip.sceneId;
+      const trimDeltaMs = trimPreview?.clipId === clip.id ? trimPreview.deltaMs : 0;
+      const canTrim = !session.readonly && trailingVideoClipIds.has(clip.id);
+      const barStyle =
+        trimDeltaMs === 0
+          ? { ...shared.style, background: tone.background, borderColor: tone.border }
+          : {
+              ...shared.style,
+              background: tone.background,
+              borderColor: tone.border,
+              width: `${secondsToPercent(
+                clip.endSeconds - clip.startSeconds + trimDeltaMs / 1_000,
+                spanSeconds,
+              )}%`,
+            };
 
       return (
         <button
           key={clip.id}
           {...shared}
           className={`ed-timeline-clip ed-video-bar${activeClass}${dragging ? ' is-dragging' : ''}`}
-          style={{ ...shared.style, background: tone.background, borderColor: tone.border }}
+          style={barStyle}
           title={clip.label}
           onPointerDown={(event) => beginSceneDrag(event, clip)}
           onPointerMove={moveSceneDrag}
@@ -858,6 +1008,17 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
           ) : (
             <span className="ed-thumb-fallback" aria-hidden="true" />
           )}
+          {canTrim ? (
+            <span
+              aria-hidden="true"
+              className="ed-trim-handle"
+              title="拖动右边缘缩短或延长分镜"
+              onPointerDown={(event) => beginTrimDrag(event, clip)}
+              onPointerMove={moveTrimDrag}
+              onPointerUp={endTrimDrag}
+              onPointerCancel={cancelTrimDrag}
+            />
+          ) : null}
         </button>
       );
     }
@@ -1275,7 +1436,7 @@ function EditorWorkspace({ project, readonly }: { project: VideoProject; readonl
               className="ed-icon-button"
               type="button"
               aria-label="分割"
-              onClick={() => notify('分割工具将在 T17 实现。')}
+              onClick={splitAtPlayhead}
             >
               <EditorIcon name="split" size={15} />
             </button>

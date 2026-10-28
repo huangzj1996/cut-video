@@ -1273,6 +1273,23 @@
   border-radius: 9999px;
 }
 
+/* 视频块右边缘裁剪手柄：只在分镜末尾片段上出现。 */
+.ed-video-bar .ed-trim-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  border-radius: 0 8px 8px 0;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.24));
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.ed-video-bar .ed-trim-handle:hover {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.38));
+}
+
 .ed-video-name {
   flex: none;
   font-size: 14px;

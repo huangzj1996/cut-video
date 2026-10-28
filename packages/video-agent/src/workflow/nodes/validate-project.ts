@@ -273,9 +273,10 @@ export function validateProject(project: VideoProject, now: string): ValidationR
       continue;
     }
 
+    // 分镜延长后配音片段会带静音尾，片段长于音频是合法状态，只提示不拦截。
     if (clip.endMs - clip.startMs > asset.durationMs + 100) {
-      errors.push(
-        issue('error', 'VOICE_CLIP_TOO_LONG', '配音片段长于音频时长。', {
+      warnings.push(
+        issue('warning', 'VOICE_CLIP_TOO_LONG', '配音片段长于音频时长，末尾为静音。', {
           clipId: clip.id,
           assetId: clip.assetId,
         }),

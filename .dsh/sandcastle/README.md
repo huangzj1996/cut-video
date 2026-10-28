@@ -15,6 +15,8 @@ frontier.ps1 ──► 每票一个 worktree ──► 每票一个 teammate ─
 - **评审**：实现者在自己的 worktree 里提交后，reviewer 在同一 worktree 上按 `CODING_STANDARDS.md` 精修。
 - **合并**：Lead 在主工作区**串行**合并，每次合并后跑 `pnpm typecheck && pnpm test`，绿了才继续。
 - **循环**：合并会解锁新票，重复直到 frontier 为空。无人值守由 DSH goal（自动续轮）驱动。
+- **状态**：每张票的 impl / review / 阶段 / worktree 记在 `state.json`（用 `state.ps1` 读写），
+  续轮恢复和返工唤醒都靠它。
 
 ## 文件
 
@@ -24,6 +26,8 @@ frontier.ps1 ──► 每票一个 worktree ──► 每票一个 teammate ─
 | `frontier.ps1`                  | 列出可开工的 issue（`-Json` 给编排用，`-Limit N` 限并发）   |
 | `worktree-init.ps1`             | 建分支 + worktree + 装依赖（`install` / `link` / `none`）   |
 | `worktree-remove.ps1`           | 合并后清理 worktree，可选安全删除分支                       |
+| `state.ps1`                     | 读写编排状态 `state.json`（issue → teammate / 阶段 / worktree） |
+| `merge.ps1`                     | 合并 + 门禁 + 失败回滚 + 关 issue + 清理 + 更新状态（幂等）  |
 | `CODING_STANDARDS.md`           | reviewer/implementer 共同遵守的规范（来自仓库真实配置）     |
 | `prompts/implement.md`          | 实现者提示词（TDD、验证、提交、报告）                       |
 | `prompts/review.md`             | 评审者提示词（code-review 双轴 + 精修）                     |
@@ -41,6 +45,7 @@ frontier.ps1 ──► 每票一个 worktree ──► 每票一个 teammate ─
 | LLM 建依赖图                                      | `gh` 原生依赖 + 正文阻塞                                           | 确定性、可复现、不烧 token                                        |
 | `Output.object` 结构化输出                        | teammate 的结构化报告 + Lead 校验                                  | 简化                                                              |
 | 内置 `maxIterations`                              | agent 自终止 + 完成契约 `<promise>COMPLETE</promise>`              | 简化                                                              |
+| `claudeCode()` 每票一个一次性 agent               | impl/review teammate 按票内生命周期复用（返工、复审、回归唤醒原 agent） | 少付 onboarding 成本，也不撞 Team 的 8 个名额                         |
 
 ## 前置条件
 
@@ -65,5 +70,5 @@ pwsh .dsh/sandcastle/worktree-remove.ps1 -Issue 4 -DeleteBranch
 对 Lead 说「无人值守跑 Sandcastle」。Lead 会用 DSH goal 建立持久目标，之后每轮自动继续，
 直到 frontier 为空且没有未合并分支；遇到无法自动决策的阻塞（合并冲突解决不了、测试长期红、gh 掉线）会停下报告。
 
-幂等性：分支名与 worktree 路径固定，`frontier` 每轮重新推导，
+幂等性：分支名与 worktree 路径固定，`frontier` 每轮重新推导，编排状态记在 `state.json`，
 所以进程中断后重跑不会重复劳动，也不会重复合并已合并的分支。

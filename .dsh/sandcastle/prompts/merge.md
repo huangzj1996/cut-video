@@ -12,31 +12,38 @@
 
 ## 步骤
 
-对每个分支，按顺序：
+对每个分支（issue 号升序）执行一条命令：
 
-1. 确认工作区干净：`git status --porcelain`（有无关改动就先停下报告，不要顺手提交别人的文件）。
-2. `git merge <branch> --no-edit`。
-3. 有冲突时：读两侧实现，按"保留上游已有行为 + 补上本 issue 的部分"解决，不要整段丢弃另一侧。
-4. 解决后立刻验证：`pnpm typecheck && pnpm test`。
-5. 验证不通过：`git merge --abort`（或 `git reset --hard` 回到合并前），把该分支标记为**未合并**并在报告里说明原因，继续处理下一个分支。
-6. 验证通过：保留合并提交（不要 squash），继续下一个分支。
+```powershell
+pwsh -File .dsh/sandcastle/merge.ps1 -Issue <N> -Json
+```
+
+脚本内部依次完成：`git merge --no-ff` → `pnpm typecheck && pnpm test` → 失败自动
+`git reset --hard` 回滚 → `gh issue close` → 清理 worktree 与已合并分支 → 更新 `state.json`。
+它是幂等的，重复执行安全。
+
+根据返回的 `status` 处理：
+
+- `merged` / `merged-with-warnings` / `already-merged`：记下 `mergeCommit` 与 warning；
+  warning（关 issue 或清理失败）下一轮补做，不要重新合并。
+- `conflict`：脚本已 `git merge --abort`。按「保留上游已有行为 + 补上本 issue 的部分」人工解决；
+  解决不了就把该票记为未合并并报告原因。
+- `gate-failed`：脚本已回滚到合并前；该票按未合并处理（state 已是 `failed`）。
+- `error`：前置条件不满足（分支不存在 / 工作区有未提交改动 / 当前不在基线分支），
+  按 `message` 修正；**不要**手工 `reset --hard` 或 `merge --abort` 绕过它。
+
+## 禁止
+
+- 不要手工 `git merge` / `git reset --hard` / `git branch -D` 绕过脚本判断。
+- 不要关闭未合并的 issue，不要 force push。
 
 ## 收尾
 
-- 全部合并完成后，跑一次全量 `pnpm typecheck && pnpm test`。
-- 对每个**成功合并**的分支，关闭对应 issue：
-  ```
-  gh issue close <ID> --comment "Completed via Sandcastle (branch <branch>)"
-  ```
-- 清理 worktree 与已合并分支：`pwsh .dsh/sandcastle/worktree-remove.ps1 -Issue <ID> -DeleteBranch`
-- 不要关闭未合并的 issue，不要删除未合并的分支。
-
-## 报告
-
-输出 `<promise>COMPLETE</promise>`，并给出：
-
-- 合并成功的分支与 commit sha
-- 冲突文件与解决方式
-- 未合并的分支及原因
-- 全量验证结果
-- 已关闭的 issue 列表
+- `pwsh -File .dsh/sandcastle/state.ps1 -Action List` 复核：成功票 `phase=merged`，失败票有 `notes`。
+- 更新共享任务为 completed（仅成功票）。
+- 输出 `<promise>COMPLETE</promise>`，并给出报告：
+  - 每张票的 `status` 与 merge commit sha
+  - 冲突文件与解决方式
+  - 未合并的分支及原因
+  - 全量验证结果
+  - 已关闭的 issue 列表

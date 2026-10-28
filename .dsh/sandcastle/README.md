@@ -20,32 +20,32 @@ frontier.ps1 ──► 每票一个 worktree ──► 每票一个 teammate ─
 
 ## 文件
 
-| 路径                            | 作用                                                        |
-| ------------------------------- | ----------------------------------------------------------- |
-| `config.json`                   | 标签、基线分支、分支前缀、worktree 目录、并发上限、最大轮数 |
-| `frontier.ps1`                  | 列出可开工的 issue（`-Json` 给编排用，`-Limit N` 限并发）   |
-| `worktree-init.ps1`             | 建分支 + worktree + 装依赖（`install` / `link` / `none`）   |
-| `worktree-remove.ps1`           | 合并后清理 worktree，可选安全删除分支                       |
+| 路径                            | 作用                                                            |
+| ------------------------------- | --------------------------------------------------------------- |
+| `config.json`                   | 标签、基线分支、分支前缀、worktree 目录、并发上限、最大轮数     |
+| `frontier.ps1`                  | 列出可开工的 issue（`-Json` 给编排用，`-Limit N` 限并发）       |
+| `worktree-init.ps1`             | 建分支 + worktree + 装依赖（`install` / `link` / `none`）       |
+| `worktree-remove.ps1`           | 合并后清理 worktree，可选安全删除分支                           |
 | `state.ps1`                     | 读写编排状态 `state.json`（issue → teammate / 阶段 / worktree） |
-| `merge.ps1`                     | 合并 + 门禁 + 失败回滚 + 关 issue + 清理 + 更新状态（幂等）  |
-| `CODING_STANDARDS.md`           | reviewer/implementer 共同遵守的规范（来自仓库真实配置）     |
-| `prompts/implement.md`          | 实现者提示词（TDD、验证、提交、报告）                       |
-| `prompts/review.md`             | 评审者提示词（code-review 双轴 + 精修）                     |
-| `prompts/merge.md`              | 合并步骤（Lead 或合并 agent 用）                            |
-| `../skills/sandcastle/SKILL.md` | 编排 SOP：一轮怎么做、无人值守怎么跑                        |
+| `merge.ps1`                     | 合并 + 门禁 + 失败回滚 + 关 issue + 清理 + 更新状态（幂等）     |
+| `CODING_STANDARDS.md`           | reviewer/implementer 共同遵守的规范（来自仓库真实配置）         |
+| `prompts/implement.md`          | 实现者提示词（TDD、验证、提交、报告）                           |
+| `prompts/review.md`             | 评审者提示词（code-review 双轴 + 精修）                         |
+| `prompts/merge.md`              | 合并步骤（Lead 或合并 agent 用）                                |
+| `../skills/sandcastle/SKILL.md` | 编排 SOP：一轮怎么做、无人值守怎么跑                            |
 
 ## 相对旧版的变化
 
-| 旧 Sandcastle                                     | 现在                                                               | 收益                                                              |
-| ------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Docker 容器每票一个                               | git worktree                                                       | 不用 Docker Desktop；依赖走 `D:\.pnpm-store` 硬链接，额外占用很小 |
-| 容器内 `pnpm install`（~10 分钟）                 | 宿主机 worktree 内安装（`--prefer-offline`，跳过 electron 二进制） | 几秒到几十秒                                                      |
-| `claudeCode()` + Anthropic 兼容网关 + `.env` 令牌 | DSH 的 subagent / teammate                                         | 不需要任何模型 key 或网关配置                                     |
-| `.env` 里的 `GH_TOKEN`                            | gh keyring 登录                                                    | 不需要把 token 写进仓库                                           |
-| LLM 建依赖图                                      | `gh` 原生依赖 + 正文阻塞                                           | 确定性、可复现、不烧 token                                        |
-| `Output.object` 结构化输出                        | teammate 的结构化报告 + Lead 校验                                  | 简化                                                              |
-| 内置 `maxIterations`                              | agent 自终止 + 完成契约 `<promise>COMPLETE</promise>`              | 简化                                                              |
-| `claudeCode()` 每票一个一次性 agent               | impl/review teammate 按票内生命周期复用（返工、复审、回归唤醒原 agent） | 少付 onboarding 成本，也不撞 Team 的 8 个名额                         |
+| 旧 Sandcastle                                     | 现在                                                                    | 收益                                                              |
+| ------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Docker 容器每票一个                               | git worktree                                                            | 不用 Docker Desktop；依赖走 `D:\.pnpm-store` 硬链接，额外占用很小 |
+| 容器内 `pnpm install`（~10 分钟）                 | 宿主机 worktree 内安装（`--prefer-offline`，跳过 electron 二进制）      | 几秒到几十秒                                                      |
+| `claudeCode()` + Anthropic 兼容网关 + `.env` 令牌 | DSH 的 subagent / teammate                                              | 不需要任何模型 key 或网关配置                                     |
+| `.env` 里的 `GH_TOKEN`                            | gh keyring 登录                                                         | 不需要把 token 写进仓库                                           |
+| LLM 建依赖图                                      | `gh` 原生依赖 + 正文阻塞                                                | 确定性、可复现、不烧 token                                        |
+| `Output.object` 结构化输出                        | teammate 的结构化报告 + Lead 校验                                       | 简化                                                              |
+| 内置 `maxIterations`                              | agent 自终止 + 完成契约 `<promise>COMPLETE</promise>`                   | 简化                                                              |
+| `claudeCode()` 每票一个一次性 agent               | impl/review teammate 按票内生命周期复用（返工、复审、回归唤醒原 agent） | 少付 onboarding 成本，也不撞 Team 的 8 个名额                     |
 
 ## 前置条件
 

@@ -132,14 +132,14 @@ pwsh -File .dsh/sandcastle/merge.ps1 -Issue <N> -Json
 
 读返回的 `status`：
 
-| status | 含义 | 你要做的 |
-| --- | --- | --- |
-| `merged` | 合并、门禁、关 issue、清理全成功 | 更新共享任务为 completed，记摘要 |
-| `merged-with-warnings` | 合并成功，但关 issue 或清理失败 | 记下 warning，下一轮补做（不要重新合并） |
-| `already-merged` | 分支之前就合过了，已补收尾 | 同上，不要重复合并 |
-| `conflict` | 冲突，已自动 abort | 按「保留上游行为 + 补本 issue 部分」人工解决；解决不了记 `blocked` 并报告 |
-| `gate-failed` | 门禁红了，已回滚到合并前 | state 已是 `failed`；按实现失败处理（下一轮重试或报告） |
-| `error` | 前置条件不满足（分支不在 / 工作区脏 / 分支不对） | 按 `message` 修正；**不要**手工 `reset --hard` 绕过它 |
+| status                 | 含义                                             | 你要做的                                                                  |
+| ---------------------- | ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `merged`               | 合并、门禁、关 issue、清理全成功                 | 更新共享任务为 completed，记摘要                                          |
+| `merged-with-warnings` | 合并成功，但关 issue 或清理失败                  | 记下 warning，下一轮补做（不要重新合并）                                  |
+| `already-merged`       | 分支之前就合过了，已补收尾                       | 同上，不要重复合并                                                        |
+| `conflict`             | 冲突，已自动 abort                               | 按「保留上游行为 + 补本 issue 部分」人工解决；解决不了记 `blocked` 并报告 |
+| `gate-failed`          | 门禁红了，已回滚到合并前                         | state 已是 `failed`；按实现失败处理（下一轮重试或报告）                   |
+| `error`                | 前置条件不满足（分支不在 / 工作区脏 / 分支不对） | 按 `message` 修正；**不要**手工 `reset --hard` 绕过它                     |
 
 - 合并成功才关 issue（脚本已处理）；不合并就不关 issue。
 - 冲突或门禁失败时，不要用新 agent 重做整张票；先按上表处理，必要时唤醒 `impl-issue-<N>`。

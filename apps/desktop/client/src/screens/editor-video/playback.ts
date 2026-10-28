@@ -7,6 +7,10 @@
 
 export const DRIFT_THRESHOLD_SECONDS = 0.05;
 
+/** 时间码分段：纯十进制，可选小数；小时/分钟段不允许小数。 */
+const DECIMAL_PART = /^\d+(?:\.\d+)?$/;
+const INTEGER_PART = /^\d+$/;
+
 export type PlaybackStatus = 'ended' | 'paused' | 'playing';
 
 export interface PlaybackState {
@@ -133,7 +137,8 @@ export function playbackReducer(state: PlaybackState, action: PlaybackAction): P
 
 /**
  * 解析用户输入的时间码：`12`、`12.5`、`MM:SS`、`HH:MM:SS`。
- * 分和秒必须小于 60；非法输入返回 null，调用方保持原播放头。
+ * 每段必须是十进制数（小数只允许出现在秒），分和秒必须小于 60；
+ * 非法输入返回 null，调用方保持原播放头。
  */
 export function parseTimecode(input: string): number | null {
   const text = input.trim();
@@ -148,17 +153,20 @@ export function parseTimecode(input: string): number | null {
     return null;
   }
 
-  const values = parts.map((part) => Number(part));
-
-  if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+  if (parts.some((part) => !DECIMAL_PART.test(part))) {
     return null;
   }
 
-  if (parts.length === 1) {
-    return values[0]!;
+  if (parts.slice(0, -1).some((part) => !INTEGER_PART.test(part))) {
+    return null;
   }
 
+  const values = parts.map(Number);
   const seconds = values[values.length - 1]!;
+
+  if (parts.length === 1) {
+    return seconds;
+  }
 
   if (seconds >= 60) {
     return null;

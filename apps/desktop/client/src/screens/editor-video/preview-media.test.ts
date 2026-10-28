@@ -5,6 +5,10 @@ import {
   buildPreviewMediaPlan,
   describeMediaElementError,
   describeVideoIssue,
+  findClipAtSeconds,
+  resolveMusicSourceSeconds,
+  resolveVideoSourceSeconds,
+  resolveVoiceSourceSeconds,
 } from './preview-media';
 
 function makeProject(): VideoProject {
@@ -336,6 +340,40 @@ describe('describeMediaElementError', () => {
     expect(describeMediaElementError({ code: 3 })).toContain('解码失败');
     expect(describeMediaElementError({ code: 2 })).toContain('加载中断');
     expect(describeMediaElementError(null)).toBe('媒体加载失败。');
+  });
+});
+
+describe('preview source mapping', () => {
+  const project = makeProject();
+  const videoTrack = project.tracks.find((track) => track.kind === 'video')!;
+  const videoClip = videoTrack.clips[0]!;
+  const voiceClip = project.tracks.find((track) => track.kind === 'voice')!.clips[0]!;
+  const musicClip = project.tracks.find((track) => track.kind === 'music')!.clips[0]!;
+  const voiceAsset = project.assets.voices[0]!;
+
+  it('maps video timeline time through speed and the source offset', () => {
+    expect(resolveVideoSourceSeconds(videoClip, 1)).toBe(4);
+    expect(resolveVideoSourceSeconds(videoClip, 0)).toBe(2);
+  });
+
+  it('holds the last source frame instead of seeking to the very end', () => {
+    expect(resolveVideoSourceSeconds(videoClip, 999)).toBe(9.999);
+  });
+
+  it('maps voice source time through speed and clamps at the asset duration', () => {
+    expect(resolveVoiceSourceSeconds({ ...voiceClip, speed: 2 }, voiceAsset, 1)).toBe(2);
+    expect(resolveVoiceSourceSeconds(voiceClip, voiceAsset, 999)).toBe(4);
+  });
+
+  it('wraps looping music and clamps non-looping music at the source end', () => {
+    expect(resolveMusicSourceSeconds(musicClip, 5)).toBe(6);
+    expect(resolveMusicSourceSeconds({ ...musicClip, loop: false }, 8)).toBe(9);
+  });
+
+  it('finds the clip at an exact boundary and keeps the last frame at the project end', () => {
+    expect(findClipAtSeconds(videoTrack.clips, 4)?.id).toBe('clip-video-2');
+    expect(findClipAtSeconds(videoTrack.clips, 10)?.id).toBe('clip-video-2');
+    expect(findClipAtSeconds(videoTrack.clips, 10.001)).toBeUndefined();
   });
 });
 

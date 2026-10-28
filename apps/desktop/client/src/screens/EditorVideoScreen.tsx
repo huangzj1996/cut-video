@@ -1,6 +1,6 @@
 /**
  * 项目级编辑器。左侧分镜、工程名、四轨时间线都来自最新 `project.json`；
- * 媒体通过受限 `asset://` 协议加载，预览播放由后续切片接入。
+ * 媒体通过受限 `asset://` 协议加载，预览由主时钟同步播放视频、配音和音乐。
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {

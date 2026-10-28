@@ -7,6 +7,7 @@ import {
   needsDriftCorrection,
   parseTimecode,
   playbackReducer,
+  resolvePlayStart,
 } from './playback';
 
 const DURATION = 10;
@@ -100,6 +101,19 @@ describe('playbackReducer', () => {
   });
 });
 
+describe('resolvePlayStart', () => {
+  it('resumes inside the project and restarts from zero at or past the end', () => {
+    expect(resolvePlayStart(4, DURATION)).toBe(4);
+    expect(resolvePlayStart(DURATION, DURATION)).toBe(0);
+    expect(resolvePlayStart(DURATION + 2, DURATION)).toBe(0);
+    expect(resolvePlayStart(-3, DURATION)).toBe(0);
+  });
+
+  it('refuses to play empty projects', () => {
+    expect(resolvePlayStart(0, 0)).toBeNull();
+  });
+});
+
 describe('anchor clock', () => {
   it('advances from the anchor without accumulating drift', () => {
     const anchor = createAnchor(2, 1_000);
@@ -138,5 +152,15 @@ describe('parseTimecode', () => {
     expect(parseTimecode('-1')).toBeNull();
     expect(parseTimecode('01:99')).toBeNull();
     expect(parseTimecode('01:02:03:04')).toBeNull();
+  });
+
+  it('rejects empty segments, non-decimal numbers, and fractional minutes/hours', () => {
+    expect(parseTimecode('01:')).toBeNull();
+    expect(parseTimecode(':30')).toBeNull();
+    expect(parseTimecode('01::30')).toBeNull();
+    expect(parseTimecode('0x10')).toBeNull();
+    expect(parseTimecode('1e3')).toBeNull();
+    expect(parseTimecode('1.5:30')).toBeNull();
+    expect(parseTimecode('01:02:03.5')).toBe(3_723.5);
   });
 });

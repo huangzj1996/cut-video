@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { VideoClip, VideoProject, VoiceClip } from '@miaoma/video-project';
+import type {
+  MusicClip,
+  SubtitleClip,
+  VideoClip,
+  VideoProject,
+  VoiceClip,
+} from '@miaoma/video-project';
 import {
   applyEdit,
   findInvariantViolations,
+  MIN_CLIP_DURATION_MS,
   type EditAction,
   type EditResult,
 } from './project-edit';
+import { resolveMusicSourceSeconds } from './preview-media';
 import { createEditingProject } from './test-support/editing-project';
 
 function videoTrackClips(project: VideoProject): VideoClip[] {
@@ -16,6 +24,24 @@ function videoTrackClips(project: VideoProject): VideoClip[] {
 function voiceTrackClips(project: VideoProject): VoiceClip[] {
   const track = project.tracks.find((candidate) => candidate.kind === 'voice');
   return ((track?.clips ?? []) as VoiceClip[]).slice().sort((a, b) => a.startMs - b.startMs);
+}
+
+function subtitleTrackClips(project: VideoProject): SubtitleClip[] {
+  const track = project.tracks.find((candidate) => candidate.kind === 'subtitle');
+  return ((track?.clips ?? []) as SubtitleClip[]).slice().sort((a, b) => a.startMs - b.startMs);
+}
+
+function musicTrackClips(project: VideoProject): MusicClip[] {
+  const track = project.tracks.find((candidate) => candidate.kind === 'music');
+  return ((track?.clips ?? []) as MusicClip[]).slice().sort((a, b) => a.startMs - b.startMs);
+}
+
+/** 用给定音乐片段替换音乐轨；用于构造有空隙、两段音乐等编辑场景。 */
+function withMusicClips(project: VideoProject, clips: MusicClip[]): VideoProject {
+  return {
+    ...project,
+    tracks: project.tracks.map((track) => (track.kind === 'music' ? { ...track, clips } : track)),
+  };
 }
 
 function clipSpan(clip: { endMs: number; startMs: number }): string {
@@ -287,6 +313,514 @@ describe('findInvariantViolations', () => {
 
     expect(findInvariantViolations(orphaned).map((violation) => violation.code)).toContain(
       'SCENE_REFERENCE_MISMATCH',
+    );
+  });
+
+  it('reports overlapping subtitles', () => {
+    const project = createEditingProject();
+    const overlapped: VideoProject = {
+      ...project,
+      tracks: project.tracks.map((track) => {
+        if (track.kind !== 'subtitle') {
+          return track;
+        }
+
+        return {
+          ...track,
+          clips: track.clips.map((clip) =>
+            clip.id === 'clip-subtitle-2' ? { ...clip, startMs: 1_000 } : clip,
+          ),
+        };
+      }),
+    };
+
+    expect(findInvariantViolations(overlapped).map((violation) => violation.code)).toContain(
+      'SUBTITLE_OVERLAP',
+    );
+  });
+
+  it('reports a scene whose subtitleIds drift from the subtitle track', () => {
+    const project = createEditingProject();
+    const drifted: VideoProject = {
+      ...project,
+      scenes: project.scenes.map((scene) =>
+        scene.id === 'scene-1' ? { ...scene, subtitleIds: ['sub-1'] } : scene,
+      ),
+    };
+
+    expect(findInvariantViolations(drifted).map((violation) => violation.code)).toContain(
+      'SCENE_SUBTITLE_REFERENCE_MISMATCH',
+    );
+  });
+
+  it('reports overlapping music clips, out-of-project clips and invalid source ranges', () => {
+    const project = createEditingProject();
+    const overlapped = withMusicClips(project, [
+      {
+        assetId: 'music-1',
+        endMs: 6_000,
+        id: 'clip-music-a',
+        kind: 'music',
+        sourceEndMs: 6_000,
+        sourceStartMs: 0,
+        startMs: 0,
+      },
+      {
+        assetId: 'music-1',
+        endMs: 12_000,
+        id: 'clip-music-b',
+        kind: 'music',
+        sourceEndMs: 6_000,
+        sourceStartMs: 0,
+        startMs: 5_000,
+      },
+    ]);
+
+    expect(findInvariantViolations(overlapped).map((violation) => violation.code)).toContain(
+      'MUSIC_TRACK_OVERLAP',
+    );
+
+    const outOfProject = withMusicClips(project, [
+      {
+        assetId: 'music-1',
+        endMs: 13_000,
+        id: 'clip-music-1',
+        kind: 'music',
+        sourceEndMs: 12_000,
+        sourceStartMs: 0,
+        startMs: 0,
+      },
+    ]);
+
+    expect(findInvariantViolations(outOfProject).map((violation) => violation.code)).toContain(
+      'MUSIC_OUT_OF_PROJECT',
+    );
+
+    const sourceBeyondAsset = withMusicClips(project, [
+      {
+        assetId: 'music-1',
+        endMs: 12_000,
+        id: 'clip-music-1',
+        kind: 'music',
+        sourceEndMs: 13_000,
+        sourceStartMs: 0,
+        startMs: 0,
+      },
+    ]);
+
+    expect(findInvariantViolations(sourceBeyondAsset).map((violation) => violation.code)).toContain(
+      'MUSIC_SOURCE_RANGE_INVALID',
+    );
+  });
+});
+
+describe('applyEdit subtitle clips', () => {
+  it('moves a subtitle inside its scene and keeps scene subtitle references intact', () => {
+    const project = createEditingProject();
+
+    const result = expectOk(
+      edit(project, { clipId: 'clip-subtitle-1', deltaMs: 500, type: 'move-subtitle-clip' }),
+    );
+
+    expect(subtitleTrackClips(result.project).map((clip) => clipSpan(clip))).toEqual([
+      '1000-2000',
+      '2000-3500',
+      '4500-6000',
+      '8000-10500',
+    ]);
+    expect(result.project.scenes.find((scene) => scene.id === 'scene-1')?.subtitleIds).toEqual([
+      'sub-1',
+      'sub-2',
+    ]);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('trims both subtitle edges without leaving the scene', () => {
+    const project = createEditingProject();
+    const trimmedStart = expectOk(
+      edit(project, {
+        clipId: 'clip-subtitle-2',
+        deltaMs: 300,
+        edge: 'start',
+        type: 'trim-subtitle-clip',
+      }),
+    );
+    const trimmedEnd = expectOk(
+      edit(project, {
+        clipId: 'clip-subtitle-1',
+        deltaMs: 300,
+        edge: 'end',
+        type: 'trim-subtitle-clip',
+      }),
+    );
+
+    expect(subtitleTrackClips(trimmedStart.project)[1]).toMatchObject({
+      endMs: 3_500,
+      startMs: 2_300,
+    });
+    expect(subtitleTrackClips(trimmedEnd.project)[0]).toMatchObject({ endMs: 1_800, startMs: 500 });
+  });
+
+  it('rejects moving or trimming a subtitle across its scene boundary', () => {
+    const project = createEditingProject();
+
+    expectRejected(
+      edit(project, {
+        clipId: 'clip-subtitle-1',
+        deltaMs: 3_000,
+        type: 'move-subtitle-clip',
+      }),
+      'EDIT_CLIP_OUT_OF_BOUNDS',
+    );
+    expectRejected(
+      edit(project, {
+        clipId: 'clip-subtitle-4',
+        deltaMs: 2_000,
+        edge: 'end',
+        type: 'trim-subtitle-clip',
+      }),
+      'EDIT_CLIP_OUT_OF_BOUNDS',
+    );
+  });
+
+  it('rejects subtitles that would overlap another cue or shrink below the minimum', () => {
+    const project = createEditingProject();
+
+    expectRejected(
+      edit(project, {
+        clipId: 'clip-subtitle-1',
+        deltaMs: 1_000,
+        type: 'move-subtitle-clip',
+      }),
+      'EDIT_CLIP_OVERLAP',
+    );
+    expectRejected(
+      edit(project, {
+        clipId: 'clip-subtitle-1',
+        deltaMs: 600,
+        edge: 'end',
+        type: 'trim-subtitle-clip',
+      }),
+      'EDIT_CLIP_OVERLAP',
+    );
+    expectRejected(
+      edit(project, {
+        clipId: 'clip-subtitle-1',
+        deltaMs: 1_000,
+        edge: 'start',
+        type: 'trim-subtitle-clip',
+      }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+  });
+
+  it('deletes a subtitle and removes it from the scene subtitle references', () => {
+    const project = createEditingProject();
+
+    const result = expectOk(
+      edit(project, { clipId: 'clip-subtitle-2', type: 'delete-subtitle-clip' }),
+    );
+
+    expect(subtitleTrackClips(result.project).map((clip) => clip.id)).toEqual([
+      'clip-subtitle-1',
+      'clip-subtitle-3',
+      'clip-subtitle-4',
+    ]);
+    expect(result.project.scenes.find((scene) => scene.id === 'scene-1')?.subtitleIds).toEqual([
+      'sub-1',
+    ]);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('reports unknown clips, no-op deltas and fractional deltas', () => {
+    const project = createEditingProject();
+
+    expectRejected(
+      edit(project, { clipId: 'clip-missing', deltaMs: 100, type: 'move-subtitle-clip' }),
+      'EDIT_CLIP_NOT_FOUND',
+    );
+    expectRejected(
+      edit(project, {
+        clipId: 'clip-subtitle-1',
+        deltaMs: 0.5,
+        type: 'move-subtitle-clip',
+      }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+
+    const unchanged = expectOk(
+      edit(project, { clipId: 'clip-subtitle-1', deltaMs: 0, type: 'move-subtitle-clip' }),
+    );
+
+    expect(unchanged.changed).toBe(false);
+    expect(unchanged.project).toBe(project);
+    expect(MIN_CLIP_DURATION_MS).toBe(100);
+  });
+});
+
+describe('applyEdit music clips', () => {
+  const GAP_PROJECT = (): VideoProject =>
+    withMusicClips(createEditingProject(), [
+      {
+        assetId: 'music-1',
+        endMs: 5_000,
+        id: 'clip-music-1',
+        kind: 'music',
+        sourceEndMs: 5_000,
+        sourceStartMs: 0,
+        startMs: 0,
+      },
+      {
+        assetId: 'music-1',
+        endMs: 12_000,
+        id: 'clip-music-2',
+        kind: 'music',
+        sourceEndMs: 6_000,
+        sourceStartMs: 0,
+        startMs: 6_000,
+      },
+    ]);
+
+  it('moves a music clip while keeping the gap around it', () => {
+    const result = expectOk(
+      edit(GAP_PROJECT(), { clipId: 'clip-music-2', deltaMs: -500, type: 'move-music-clip' }),
+    );
+
+    expect(musicTrackClips(result.project).map((clip) => clipSpan(clip))).toEqual([
+      '0-5000',
+      '5500-11500',
+    ]);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('rejects music that leaves the project or overlaps another music clip', () => {
+    expectRejected(
+      edit(GAP_PROJECT(), { clipId: 'clip-music-2', deltaMs: 100, type: 'move-music-clip' }),
+      'EDIT_CLIP_OUT_OF_BOUNDS',
+    );
+    expectRejected(
+      edit(GAP_PROJECT(), { clipId: 'clip-music-1', deltaMs: -100, type: 'move-music-clip' }),
+      'EDIT_CLIP_OUT_OF_BOUNDS',
+    );
+    expectRejected(
+      edit(GAP_PROJECT(), { clipId: 'clip-music-2', deltaMs: -1_500, type: 'move-music-clip' }),
+      'EDIT_CLIP_OVERLAP',
+    );
+  });
+
+  it('trims both music edges and keeps the source range in step', () => {
+    const project = createEditingProject();
+    const trimmedStart = expectOk(
+      edit(project, {
+        clipId: 'clip-music-1',
+        deltaMs: 1_000,
+        edge: 'start',
+        type: 'trim-music-clip',
+      }),
+    );
+    const trimmedEnd = expectOk(
+      edit(trimmedStart.project, {
+        clipId: 'clip-music-1',
+        deltaMs: -1_000,
+        edge: 'end',
+        type: 'trim-music-clip',
+      }),
+    );
+
+    expect(musicTrackClips(trimmedStart.project)[0]).toMatchObject({
+      endMs: 12_000,
+      sourceStartMs: 1_000,
+      startMs: 1_000,
+    });
+    expect(musicTrackClips(trimmedEnd.project)[0]).toMatchObject({
+      endMs: 11_000,
+      sourceEndMs: 11_000,
+      sourceStartMs: 1_000,
+      startMs: 1_000,
+    });
+  });
+
+  it('rejects trims that leave the asset or project range', () => {
+    const shortAssetProject: VideoProject = {
+      ...GAP_PROJECT(),
+      assets: {
+        ...createEditingProject().assets,
+        music: [
+          {
+            artist: 'Mika Chen',
+            durationMs: 6_000,
+            id: 'music-1',
+            path: '/media/song.mp3',
+            title: 'Eutopia',
+          },
+        ],
+      },
+    };
+
+    expectRejected(
+      edit(shortAssetProject, {
+        clipId: 'clip-music-1',
+        deltaMs: 1_500,
+        edge: 'end',
+        type: 'trim-music-clip',
+      }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+    expectRejected(
+      edit(createEditingProject(), {
+        clipId: 'clip-music-1',
+        deltaMs: 2_000,
+        edge: 'end',
+        type: 'trim-music-clip',
+      }),
+      'EDIT_CLIP_OUT_OF_BOUNDS',
+    );
+    expectRejected(
+      edit(createEditingProject(), {
+        clipId: 'clip-music-1',
+        deltaMs: -100,
+        edge: 'start',
+        type: 'trim-music-clip',
+      }),
+      'EDIT_CLIP_OUT_OF_BOUNDS',
+    );
+    expectRejected(
+      edit(GAP_PROJECT(), {
+        clipId: 'clip-music-2',
+        deltaMs: -100,
+        edge: 'start',
+        type: 'trim-music-clip',
+      }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+    expectRejected(
+      edit(createEditingProject(), {
+        clipId: 'clip-music-1',
+        deltaMs: -11_950,
+        edge: 'end',
+        type: 'trim-music-clip',
+      }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+  });
+
+  it('splits a non-loop music clip into contiguous source ranges', () => {
+    const result = expectOk(
+      edit(createEditingProject(), {
+        atMs: 6_000,
+        clipId: 'clip-music-1',
+        type: 'split-music-clip',
+      }),
+    );
+    const clips = musicTrackClips(result.project);
+
+    expect(clips.map((clip) => clipSpan(clip))).toEqual(['0-6000', '6000-12000']);
+    expect(clips.map((clip) => `${clip.sourceStartMs}-${clip.sourceEndMs}`)).toEqual([
+      '0-6000',
+      '6000-12000',
+    ]);
+    expect(new Set(clips.map((clip) => clip.id)).size).toBe(2);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('splits a looping clip so both sides keep the loop phase continuous', () => {
+    const project = withMusicClips(createEditingProject(), [
+      {
+        assetId: 'music-1',
+        endMs: 12_000,
+        id: 'clip-music-1',
+        kind: 'music',
+        loop: true,
+        sourceEndMs: 9_000,
+        sourceStartMs: 5_000,
+        startMs: 0,
+      },
+    ]);
+
+    const result = expectOk(
+      edit(project, { atMs: 5_000, clipId: 'clip-music-1', type: 'split-music-clip' }),
+    );
+    const [left, right] = musicTrackClips(result.project);
+
+    expect(left).toMatchObject({ endMs: 5_000, loop: true, sourceStartMs: 5_000, startMs: 0 });
+    // 5s 处在 4s 循环窗口里的相位是 6s：右段从 6s 开始，保证分割瞬间不断音。
+    expect(right).toMatchObject({
+      loop: true,
+      sourceEndMs: 9_000,
+      sourceStartMs: 6_000,
+      startMs: 5_000,
+    });
+    expect(resolveMusicSourceSeconds(left!, 4.999)).toBeCloseTo(5.999, 2);
+    expect(resolveMusicSourceSeconds(right!, 5.001)).toBeCloseTo(6.001, 2);
+  });
+
+  it('rejects splits too close to either edge or beyond the trimmed audio range', () => {
+    expectRejected(
+      edit(createEditingProject(), {
+        atMs: 50,
+        clipId: 'clip-music-1',
+        type: 'split-music-clip',
+      }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+    expectRejected(
+      edit(createEditingProject(), {
+        atMs: 11_950,
+        clipId: 'clip-music-1',
+        type: 'split-music-clip',
+      }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+
+    const shortSource = withMusicClips(createEditingProject(), [
+      {
+        assetId: 'music-1',
+        endMs: 12_000,
+        id: 'clip-music-1',
+        kind: 'music',
+        loop: false,
+        sourceEndMs: 8_000,
+        sourceStartMs: 0,
+        startMs: 0,
+      },
+    ]);
+
+    expectRejected(
+      edit(shortSource, { atMs: 9_000, clipId: 'clip-music-1', type: 'split-music-clip' }),
+      'EDIT_INVALID_CLIP_RANGE',
+    );
+  });
+
+  it('keeps clip ids unique when a split result is split again', () => {
+    const first = expectOk(
+      edit(createEditingProject(), {
+        atMs: 3_000,
+        clipId: 'clip-music-1',
+        type: 'split-music-clip',
+      }),
+    );
+    const rightId = musicTrackClips(first.project)[1]?.id ?? '';
+
+    const second = expectOk(
+      edit(first.project, { atMs: 6_000, clipId: rightId, type: 'split-music-clip' }),
+    );
+
+    expect(new Set(musicTrackClips(second.project).map((clip) => clip.id)).size).toBe(3);
+  });
+
+  it('deletes a music clip and leaves an empty music track', () => {
+    const result = expectOk(
+      edit(createEditingProject(), { clipId: 'clip-music-1', type: 'delete-music-clip' }),
+    );
+
+    expect(musicTrackClips(result.project)).toEqual([]);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('reports unknown music clips', () => {
+    expectRejected(
+      edit(createEditingProject(), { clipId: 'clip-missing', type: 'delete-music-clip' }),
+      'EDIT_CLIP_NOT_FOUND',
     );
   });
 });

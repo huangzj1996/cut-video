@@ -10,9 +10,14 @@ import {
   type EditorSessionState,
 } from './editor-session';
 import { createEditingProject } from './test-support/editing-project';
+import type { EditAction } from './project-edit';
 
 function reorder(sceneId: string, targetIndex: number): EditorSessionAction {
   return { action: { sceneId, targetIndex, type: 'reorder-scene' }, type: 'edit' };
+}
+
+function edit(action: EditAction): EditorSessionAction {
+  return { action, type: 'edit' };
 }
 
 function reduce(state: EditorSessionState, ...actions: EditorSessionAction[]): EditorSessionState {
@@ -63,6 +68,36 @@ describe('editor session editing', () => {
     expect(session.project).toBe(initial.project);
     expect(session.dirty).toBe(false);
     expect(session.lastEditError).toContain('分镜');
+  });
+
+  it('undoes and redoes subtitle and music edits as single history steps', () => {
+    const initial = createEditorSession(createEditingProject());
+    const withSplitMusic = reduce(
+      initial,
+      edit({ atMs: 6_000, clipId: 'clip-music-1', type: 'split-music-clip' }),
+    );
+    const withDeletedSubtitle = reduce(
+      withSplitMusic,
+      edit({ clipId: 'clip-subtitle-2', type: 'delete-subtitle-clip' }),
+    );
+
+    expect(withDeletedSubtitle.dirty).toBe(true);
+    expect(withDeletedSubtitle.editSeq).toBe(initial.editSeq + 2);
+    expect(
+      withDeletedSubtitle.project.scenes.find((scene) => scene.id === 'scene-1')?.subtitleIds,
+    ).toEqual(['sub-1']);
+    expect(
+      withDeletedSubtitle.project.tracks.find((track) => track.kind === 'music')?.clips,
+    ).toHaveLength(2);
+
+    const undoneSubtitle = reduce(withDeletedSubtitle, { type: 'undo' });
+    const undoneMusic = reduce(undoneSubtitle, { type: 'undo' });
+    const redoneMusic = reduce(undoneMusic, { type: 'redo' });
+
+    expect(undoneSubtitle.project).toBe(withSplitMusic.project);
+    expect(undoneMusic.project).toBe(initial.project);
+    expect(redoneMusic.project).toBe(withSplitMusic.project);
+    expect(canRedoSession(undoneMusic)).toBe(true);
   });
 
   it('undoes and redoes a reorder', () => {

@@ -216,6 +216,9 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 /**
  * 用 OfflineAudioContext 解码音频；Chromium 支持 WAV/MP3/M4A/AAC。
  * 放到 OfflineAudioContext 上解码不会播放声音，也不需要用户交互授权。
+ *
+ * 采样率刻意取 8kHz：波形只需要每个桶的峰值，低采样率能把长音乐的
+ * PCM 内存峰值压到可接受范围（decodeAudioData 会按上下文采样率重采样）。
  */
 export async function decodeAudioChannels(bytes: ArrayBuffer): Promise<Float32Array[]> {
   const OfflineContext = globalThis.OfflineAudioContext;
@@ -224,7 +227,7 @@ export async function decodeAudioChannels(bytes: ArrayBuffer): Promise<Float32Ar
     throw new Error('OFFLINE_AUDIO_CONTEXT_UNAVAILABLE');
   }
 
-  const context = new OfflineContext(1, 1, 48_000);
+  const context = new OfflineContext(1, 1, 8_000);
   const buffer = await context.decodeAudioData(bytes);
   const channels: Float32Array[] = [];
 

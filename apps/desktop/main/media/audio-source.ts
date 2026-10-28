@@ -11,8 +11,11 @@ import { mimeTypeForPath } from './asset-protocol';
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
-/** 单条音频最大 32MB；超过时界面回退到静态占位，而不是拖垮渲染进程。 */
-export const MAX_AUDIO_SOURCE_BYTES = 32 * 1024 * 1024;
+/**
+ * 单条音频最大 16MB；波形只为显示服务，超过时回退静态占位，
+ * 避免把超长音频送进渲染进程解码造成内存峰值。
+ */
+export const MAX_AUDIO_SOURCE_BYTES = 16 * 1024 * 1024;
 
 export type AudioSourceProject = Pick<StoredProject, 'assets'>;
 

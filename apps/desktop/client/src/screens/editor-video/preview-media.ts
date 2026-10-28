@@ -15,8 +15,8 @@ import type {
 
 const PLAYABLE_VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4']);
 const PLAYABLE_VIDEO_CODECS = new Set(['avc', 'avc1', 'h264']);
-/** 停在片段末尾时回退一点，避免 video 元素 seek 到 duration 变黑。 */
-const LAST_FRAME_GUARD_SECONDS = 0.001;
+/** 停在 source 末尾时回退一点：避免 video seek 到 duration 变黑，也给音频留出判停余量。 */
+const SOURCE_END_GUARD_SECONDS = 0.001;
 
 export type PreviewIssueKind =
   | 'missing-asset'
@@ -73,7 +73,7 @@ export interface MediaErrorLike {
  * 音频片段已经播完（且不循环）时应暂停元素，否则媒体会越过裁剪点继续出声。
  */
 export function audioReachedSourceEnd(plan: PreviewAudioPlan): boolean {
-  return !plan.loop && plan.sourceSeconds >= plan.sourceEndSeconds - LAST_FRAME_GUARD_SECONDS;
+  return !plan.loop && plan.sourceSeconds >= plan.sourceEndSeconds - SOURCE_END_GUARD_SECONDS;
 }
 
 /**
@@ -130,7 +130,7 @@ export function findClipAtSeconds<T extends ClippedMs>(
 }
 
 function lastFrameSourceSeconds(sourceEndMs: number): number {
-  return Math.max(0, sourceEndMs / 1_000 - LAST_FRAME_GUARD_SECONDS);
+  return Math.max(0, sourceEndMs / 1_000 - SOURCE_END_GUARD_SECONDS);
 }
 
 export function resolveVideoSourceSeconds(clip: VideoClip, timelineSeconds: number): number {

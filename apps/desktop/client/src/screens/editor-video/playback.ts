@@ -49,6 +49,19 @@ export function advancePosition(anchor: PlaybackAnchor, nowMs: number): number {
   return anchor.positionSeconds + Math.max(0, nowMs - anchor.atMs) / 1_000;
 }
 
+/**
+ * 播放起点：播放头已在末尾时从 0 重播；时长为 0 的项目无法播放，返回 null。
+ */
+export function resolvePlayStart(positionSeconds: number, durationSeconds: number): number | null {
+  if (durationSeconds <= 0) {
+    return null;
+  }
+
+  const from = clampPosition(positionSeconds, durationSeconds);
+
+  return from >= durationSeconds ? 0 : from;
+}
+
 export function needsDriftCorrection(
   masterSeconds: number,
   mediaSeconds: number,
@@ -58,17 +71,12 @@ export function needsDriftCorrection(
   return Math.abs(masterSeconds - mediaSeconds) > thresholdSeconds + 1e-9;
 }
 
-function play(
-  state: PlaybackState,
-  durationSeconds: number,
-  positionSeconds: number,
-): PlaybackState {
-  if (durationSeconds <= 0) {
+function play(durationSeconds: number, positionSeconds: number): PlaybackState {
+  const start = resolvePlayStart(positionSeconds, durationSeconds);
+
+  if (start === null) {
     return { positionSeconds: 0, status: 'paused' };
   }
-
-  const from = clampPosition(positionSeconds, durationSeconds);
-  const start = from >= durationSeconds ? 0 : from;
 
   return { positionSeconds: start, status: 'playing' };
 }
@@ -76,7 +84,7 @@ function play(
 export function playbackReducer(state: PlaybackState, action: PlaybackAction): PlaybackState {
   switch (action.type) {
     case 'play':
-      return play(state, action.durationSeconds, action.positionSeconds ?? state.positionSeconds);
+      return play(action.durationSeconds, action.positionSeconds ?? state.positionSeconds);
 
     case 'pause':
       return {

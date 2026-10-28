@@ -4,6 +4,7 @@ import {
   createAnchor,
   createPlaybackState,
   playbackReducer,
+  resolvePlayStart,
   type PlaybackStatus,
 } from './playback';
 
@@ -43,16 +44,14 @@ export function usePlaybackClock(durationSeconds: number): PlaybackClock {
 
   const play = useCallback(() => {
     const duration = durationRef.current;
+    const start = resolvePlayStart(stateRef.current.positionSeconds, duration);
 
-    if (duration <= 0) {
+    if (start === null) {
       return;
     }
 
-    const current = stateRef.current.positionSeconds;
-    const from = current >= duration ? 0 : current;
-
-    anchorRef.current = createAnchor(from, performance.now());
-    dispatch({ durationSeconds: duration, positionSeconds: from, type: 'play' });
+    anchorRef.current = createAnchor(start, performance.now());
+    dispatch({ durationSeconds: duration, positionSeconds: start, type: 'play' });
   }, []);
 
   const pause = useCallback(() => {

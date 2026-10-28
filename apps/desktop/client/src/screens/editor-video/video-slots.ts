@@ -30,6 +30,10 @@ function emptySlot(): VideoSlot {
   return { assetId: null, clipId: null, error: null, ready: false };
 }
 
+function isEmptySlot(slot: VideoSlot): boolean {
+  return slot.assetId === null && slot.clipId === null && !slot.ready && !slot.error;
+}
+
 export function createVideoSlots(): VideoSlotsState {
   return {
     active: null,
@@ -66,9 +70,7 @@ function withSlot(
  */
 function assign(slot: VideoSlot, demand: VideoSlotDemand | null): VideoSlot {
   if (!demand) {
-    return slot.assetId === null && slot.clipId === null && !slot.ready && !slot.error
-      ? slot
-      : emptySlot();
+    return isEmptySlot(slot) ? slot : emptySlot();
   }
 
   if (slot.clipId === demand.clipId && slot.assetId === demand.assetId) {
@@ -82,20 +84,17 @@ function assign(slot: VideoSlot, demand: VideoSlotDemand | null): VideoSlot {
   return { assetId: demand.assetId, clipId: demand.clipId, error: null, ready: false };
 }
 
+/** 已持有该片段或任一空槽位；都没有时返回 null，由调用方决定抢占哪个槽位。 */
+function findAvailableSlot(state: VideoSlotsState, demand: VideoSlotDemand): VideoSlotKey | null {
+  return (
+    slotForClip(state, demand.clipId) ??
+    VIDEO_SLOT_KEYS.find((key) => state.slots[key].clipId === null) ??
+    null
+  );
+}
+
 function pickIdleSlot(state: VideoSlotsState, demand: VideoSlotDemand): VideoSlotKey {
-  const matching = slotForClip(state, demand.clipId);
-
-  if (matching) {
-    return matching;
-  }
-
-  const empty = VIDEO_SLOT_KEYS.find((key) => state.slots[key].clipId === null);
-
-  if (empty) {
-    return empty;
-  }
-
-  return state.active ? otherSlot(state.active) : 'a';
+  return findAvailableSlot(state, demand) ?? (state.active ? otherSlot(state.active) : 'a');
 }
 
 function pickActiveSlot(
@@ -103,16 +102,10 @@ function pickActiveSlot(
   active: VideoSlotDemand,
   next: VideoSlotDemand | null,
 ): VideoSlotKey {
-  const matching = slotForClip(state, active.clipId);
+  const available = findAvailableSlot(state, active);
 
-  if (matching) {
-    return matching;
-  }
-
-  const empty = VIDEO_SLOT_KEYS.find((key) => state.slots[key].clipId === null);
-
-  if (empty) {
-    return empty;
+  if (available) {
+    return available;
   }
 
   const busyWithNext = next ? slotForClip(state, next.clipId) : null;

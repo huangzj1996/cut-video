@@ -11,7 +11,9 @@
 //                               branch (1 iteration). All issue pipelines run
 //                               concurrently via Promise.allSettled().
 //   Phase 3 (Merge):            A single agent merges all completed branches
-//                               into the current branch.
+//                               into the current branch. It runs directly on
+//                               the host (noSandbox) so it can use the host's
+//                               node_modules and toolchain.
 //
 // The outer loop repeats up to MAX_ITERATIONS times so that newly unblocked
 // issues are picked up after each round of merges.
@@ -23,6 +25,7 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { z } from "zod";
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
@@ -43,25 +46,39 @@ const planSchema = z.object({
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 
+// Issue sandboxes share a host-side pnpm store so dependencies are downloaded
+// once per host, not once per fresh container. The host directory must exist
+// before Docker bind-mounts it: `mkdir -p ~/.sandcastle/pnpm-store`.
+const pnpmStoreMount = {
+  hostPath: "~/.sandcastle/pnpm-store",
+  sandboxPath: "/home/agent/pnpm-store",
+};
+
 // The sandbox runs Linux while the host may be Windows/macOS, so the host's
 // node_modules cannot be copied in: native binaries (esbuild, electron) would
 // be wrong, and Windows cp cannot recreate the .bin symlinks. Install inside
 // the container instead. corepack honours the packageManager field, and its
 // shims make `pnpm -r` available to the prompts' typecheck/test commands.
+//
+// The container has no copy of the host's ~/.npmrc, so it would otherwise hit
+// registry.npmjs.org directly — slow and prone to stalling from mainland
+// China. Point both pnpm and corepack's own bootstrap at the npmmirror mirror.
 const installDependencies = {
   command:
+    'echo "registry=https://registry.npmmirror.com/" > "$HOME/.npmrc" && ' +
     'git config --global url."https://github.com/".insteadOf "git@github.com:" && ' +
     'git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" && ' +
     'corepack enable --install-directory "$HOME/.local/bin" && ' +
+    'COREPACK_NPM_REGISTRY="https://registry.npmmirror.com" ' +
     "COREPACK_ENABLE_DOWNLOAD_PROMPT=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 GIT_TERMINAL_PROMPT=0 " +
-    "corepack pnpm install --frozen-lockfile",
+    "corepack pnpm install --frozen-lockfile --store-dir=/home/agent/pnpm-store",
   timeoutMs: 900_000,
 };
 
 // The planner only reads issues; it doesn't need dependencies.
 const plannerHooks = {};
 
-// Implementer, reviewer and merger run typecheck/tests, so they need deps.
+// Implementer and reviewer run typecheck/tests, so they need deps.
 const issueHooks = {
   sandbox: { onSandboxReady: [installDependencies] },
 };
@@ -128,7 +145,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     issues.map(async (issue) => {
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
-        sandbox: docker(),
+        sandbox: docker({ mounts: [pnpmStoreMount] }),
         hooks: issueHooks,
       });
 
@@ -218,11 +235,18 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // uses to know which branches to merge and which issues to close.
   // -------------------------------------------------------------------------
   await sandcastle.run({
-    hooks: issueHooks,
-    sandbox: docker(),
+    // Run on the host: the merge agent uses the host's node_modules directly.
+    // A container would have to reinstall dependencies through the 9p mount,
+    // which rewrites the host's workspace junctions into Linux symlinks and
+    // breaks them for Windows (EACCES on the next host-side pnpm install).
+    sandbox: noSandbox(),
     name: "merger",
     maxIterations: 1,
-    agent: sandcastle.claudeCode("deepseek-flash"),
+    // noSandbox does not pass --dangerously-skip-permissions, so opt in
+    // explicitly or the merge agent cannot run git/pnpm/gh commands.
+    agent: sandcastle.claudeCode("deepseek-flash", {
+      permissionMode: "bypassPermissions",
+    }),
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.

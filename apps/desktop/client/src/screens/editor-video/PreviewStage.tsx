@@ -8,11 +8,18 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { assetUrl } from '../../lib/media';
+import {
+  alignMediaElement,
+  applySlotSource,
+  handleMusicEnded,
+  pauseMediaElement,
+  seekMediaElement,
+  syncAudioElement,
+  syncAudioMetadata,
+} from './media-sync';
 import { needsDriftCorrection } from './playback';
 import {
-  audioReachedSourceEnd,
   describeMediaElementError,
-  type PreviewAudioPlan,
   type PreviewMediaPlan,
   type PreviewVideoPlan,
 } from './preview-media';
@@ -24,7 +31,6 @@ import {
   syncVideoSlots,
   VIDEO_SLOT_KEYS,
   visibleSlot,
-  type VideoSlot,
   type VideoSlotDemand,
   type VideoSlotKey,
   type VideoSlotsState,
@@ -47,119 +53,6 @@ function videoPlanOf(plan: PreviewVideoPlan | null): PreviewVideoPlan | null {
 
 function demandOf(plan: PreviewVideoPlan | null): VideoSlotDemand | null {
   return plan ? { assetId: plan.assetId, clipId: plan.clipId } : null;
-}
-
-/** 元数据尚未就绪时设置 currentTime 会被忽略，返回 false 让调用方等待 loadedmetadata。 */
-function seekMediaElement(element: HTMLMediaElement, seconds: number): boolean {
-  try {
-    element.currentTime = seconds;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function pauseMediaElement(element: HTMLMediaElement): void {
-  if (!element.paused) {
-    element.pause();
-  }
-}
-
-function syncMediaPlayState(element: HTMLMediaElement, playing: boolean): void {
-  if (!playing) {
-    pauseMediaElement(element);
-    return;
-  }
-
-  if (element.paused) {
-    void element.play().catch(() => {
-      // 自动播放/解码失败由 onError 呈现为占位说明。
-    });
-  }
-}
-
-/** 暂停或偏差超过阈值时对齐到主时钟，然后同步播放状态。 */
-function alignMediaElement(
-  element: HTMLMediaElement,
-  sourceSeconds: number,
-  playing: boolean,
-): void {
-  if (!playing || needsDriftCorrection(sourceSeconds, element.currentTime)) {
-    seekMediaElement(element, sourceSeconds);
-  }
-
-  syncMediaPlayState(element, playing);
-}
-
-function loadMediaSource(element: HTMLMediaElement, assetId: string, projectId: string): void {
-  element.dataset.assetId = assetId;
-  element.src = assetUrl(projectId, assetId);
-  element.load();
-}
-
-function applySlotSource(
-  element: HTMLVideoElement | null,
-  slot: VideoSlot,
-  projectId: string,
-): void {
-  if (!element) {
-    return;
-  }
-
-  if (!slot.assetId) {
-    if (element.dataset.assetId) {
-      delete element.dataset.assetId;
-      element.removeAttribute('src');
-      element.load();
-    }
-
-    return;
-  }
-
-  if (element.dataset.assetId !== slot.assetId) {
-    loadMediaSource(element, slot.assetId, projectId);
-  }
-}
-
-/** 对齐并播放音频元素；返回值表示 source 是否刚被重新加载（用于清掉旧错误）。 */
-function syncAudioElement(
-  element: HTMLAudioElement | null,
-  plan: PreviewAudioPlan | null,
-  projectId: string,
-  muted: boolean,
-  playing: boolean,
-): boolean {
-  if (!element) {
-    return false;
-  }
-
-  if (!plan) {
-    pauseMediaElement(element);
-    return false;
-  }
-
-  const sourceChanged = element.dataset.assetId !== plan.assetId;
-
-  if (sourceChanged) {
-    loadMediaSource(element, plan.assetId, projectId);
-  }
-
-  element.muted = muted;
-  element.volume = plan.volume;
-  element.playbackRate = plan.playbackRate;
-
-  if (audioReachedSourceEnd(plan)) {
-    pauseMediaElement(element);
-    return false;
-  }
-
-  if (sourceChanged) {
-    syncMediaPlayState(element, playing);
-  } else {
-    alignMediaElement(element, plan.sourceSeconds, playing);
-  }
-
-  return sourceChanged;
 }
 
 export function PreviewStage({
@@ -267,46 +160,6 @@ export function PreviewStage({
     updateSlots((previous) => markSlotFailed(previous, key, message));
   };
 
-  const syncAudioMetadata = (
-    element: HTMLAudioElement | null,
-    audioPlan: PreviewAudioPlan | null,
-  ) => {
-    if (!element || !audioPlan || !seekMediaElement(element, audioPlan.sourceSeconds)) {
-      return;
-    }
-
-    element.playbackRate = audioPlan.playbackRate;
-
-    if (playingRef.current && !audioReachedSourceEnd(audioPlan)) {
-      void element.play().catch(() => {
-        // 解码失败由 onError 呈现。
-      });
-    }
-  };
-
-  const handleMusicEnded = (element: HTMLAudioElement | null) => {
-    if (!element) {
-      return;
-    }
-
-    const musicPlan = planRef.current.music;
-
-    if (!musicPlan || !musicPlan.loop || element.dataset.assetId !== musicPlan.assetId) {
-      pauseMediaElement(element);
-      return;
-    }
-
-    if (!seekMediaElement(element, musicPlan.sourceSeconds)) {
-      return;
-    }
-
-    if (playingRef.current) {
-      void element.play().catch(() => {
-        // 循环失败时保持暂停，状态仍由主时钟控制。
-      });
-    }
-  };
-
   const visibleKey = visibleSlot(slots);
   const activeSlot = slots.active ? slots.slots[slots.active] : null;
   const activeError = activeSlot?.error ?? null;
@@ -382,7 +235,9 @@ export function PreviewStage({
           className="ed-preview-audio"
           preload="auto"
           onError={() => setAudioError(describeMediaElementError(voiceRef.current?.error))}
-          onLoadedMetadata={() => syncAudioMetadata(voiceRef.current, planRef.current.voice)}
+          onLoadedMetadata={() =>
+            syncAudioMetadata(voiceRef.current, planRef.current.voice, playingRef.current)
+          }
         />
       ) : null}
 
@@ -391,9 +246,13 @@ export function PreviewStage({
           ref={musicRef}
           className="ed-preview-audio"
           preload="auto"
-          onEnded={() => handleMusicEnded(musicRef.current)}
+          onEnded={() =>
+            handleMusicEnded(musicRef.current, planRef.current.music, playingRef.current)
+          }
           onError={() => setAudioError(describeMediaElementError(musicRef.current?.error))}
-          onLoadedMetadata={() => syncAudioMetadata(musicRef.current, planRef.current.music)}
+          onLoadedMetadata={() =>
+            syncAudioMetadata(musicRef.current, planRef.current.music, playingRef.current)
+          }
         />
       ) : null}
     </div>

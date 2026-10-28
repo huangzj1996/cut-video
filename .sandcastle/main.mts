@@ -41,18 +41,30 @@ const planSchema = z.object({
 
 // Maximum number of plan→execute→merge cycles before stopping.
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
-const MAX_ITERATIONS = 10;
+const MAX_ITERATIONS = 100;
 
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
-const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+// The sandbox runs Linux while the host may be Windows/macOS, so the host's
+// node_modules cannot be copied in: native binaries (esbuild, electron) would
+// be wrong, and Windows cp cannot recreate the .bin symlinks. Install inside
+// the container instead. corepack honours the packageManager field, and its
+// shims make `pnpm -r` available to the prompts' typecheck/test commands.
+const installDependencies = {
+  command:
+    'git config --global url."https://github.com/".insteadOf "git@github.com:" && ' +
+    'git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" && ' +
+    'corepack enable --install-directory "$HOME/.local/bin" && ' +
+    "COREPACK_ENABLE_DOWNLOAD_PROMPT=0 ELECTRON_SKIP_BINARY_DOWNLOAD=1 GIT_TERMINAL_PROMPT=0 " +
+    "corepack pnpm install --frozen-lockfile",
+  timeoutMs: 900_000,
 };
 
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
-// platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+// The planner only reads issues; it doesn't need dependencies.
+const plannerHooks = {};
+
+// Implementer, reviewer and merger run typecheck/tests, so they need deps.
+const issueHooks = {
+  sandbox: { onSandboxReady: [installDependencies] },
+};
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -71,7 +83,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // It outputs a <plan> JSON block — Output.object parses and validates it.
   // -------------------------------------------------------------------------
   const plan = await sandcastle.run({
-    hooks,
+    hooks: plannerHooks,
     sandbox: docker(),
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
@@ -116,8 +128,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
         sandbox: docker(),
-        hooks,
-        copyToWorktree,
+        hooks: issueHooks,
       });
 
       try {
@@ -206,7 +217,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // uses to know which branches to merge and which issues to close.
   // -------------------------------------------------------------------------
   await sandcastle.run({
-    hooks,
+    hooks: issueHooks,
     sandbox: docker(),
     name: "merger",
     maxIterations: 1,

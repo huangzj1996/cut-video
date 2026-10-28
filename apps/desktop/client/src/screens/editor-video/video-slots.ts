@@ -93,10 +93,6 @@ function findAvailableSlot(state: VideoSlotsState, demand: VideoSlotDemand): Vid
   );
 }
 
-function pickIdleSlot(state: VideoSlotsState, demand: VideoSlotDemand): VideoSlotKey {
-  return findAvailableSlot(state, demand) ?? (state.active ? otherSlot(state.active) : 'a');
-}
-
 function pickActiveSlot(
   state: VideoSlotsState,
   active: VideoSlotDemand,
@@ -132,7 +128,7 @@ export function syncVideoSlots(
 
     // 当前是图片片段时仍可提前加载下一段视频，切到视频时无需等待。
     if (next) {
-      const key = pickIdleSlot(result, next);
+      const key = findAvailableSlot(result, next) ?? 'a';
 
       result = withSlot(result, key, assign(result.slots[key], next));
     }

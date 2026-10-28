@@ -57,7 +57,7 @@ export function usePlaybackClock(durationSeconds: number): PlaybackClock {
     const current = stateRef.current;
     const position =
       current.status === 'playing'
-        ? Math.min(durationRef.current, advancePosition(anchorRef.current, now))
+        ? clampPosition(advancePosition(anchorRef.current, now), durationRef.current)
         : current.positionSeconds;
 
     anchorRef.current = createAnchor(position, now);

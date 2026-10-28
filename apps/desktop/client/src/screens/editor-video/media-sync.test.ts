@@ -128,7 +128,7 @@ describe('applySlotSource', () => {
   it('loads a new asset into the slot', () => {
     const element = createMediaElement({ assetId: 'old-asset' });
 
-    applySlotSource(asMedia(element) as HTMLVideoElement, { assetId: 'new-asset' }, 'project-1');
+    applySlotSource(asMedia(element) as HTMLVideoElement, 'new-asset', 'project-1');
 
     expect(element.dataset.assetId).toBe('new-asset');
     expect(element.src).toBe('asset://project-1/new-asset');
@@ -139,7 +139,7 @@ describe('applySlotSource', () => {
     const element = createMediaElement({ assetId: 'same-asset' });
     element.src = 'asset://project-1/same-asset';
 
-    applySlotSource(asMedia(element) as HTMLVideoElement, { assetId: 'same-asset' }, 'project-1');
+    applySlotSource(asMedia(element) as HTMLVideoElement, 'same-asset', 'project-1');
 
     expect(element.loadCalls).toBe(0);
   });
@@ -148,7 +148,7 @@ describe('applySlotSource', () => {
     const element = createMediaElement({ assetId: 'old-asset' });
     element.src = 'asset://project-1/old-asset';
 
-    applySlotSource(asMedia(element) as HTMLVideoElement, { assetId: null }, 'project-1');
+    applySlotSource(asMedia(element) as HTMLVideoElement, null, 'project-1');
 
     expect(element.dataset.assetId).toBeUndefined();
     expect(element.removedAttributes).toEqual(['src']);

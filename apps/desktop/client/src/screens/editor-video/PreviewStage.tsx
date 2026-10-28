@@ -100,8 +100,8 @@ export function PreviewStage({
   }, [activeAssetId, activeClipId, nextAssetId, nextClipId]);
 
   useEffect(() => {
-    applySlotSource(videoARef.current, slots.slots.a, projectId);
-    applySlotSource(videoBRef.current, slots.slots.b, projectId);
+    applySlotSource(videoARef.current, slots.slots.a.assetId, projectId);
+    applySlotSource(videoBRef.current, slots.slots.b.assetId, projectId);
   }, [projectId, slots]);
 
   useEffect(() => {

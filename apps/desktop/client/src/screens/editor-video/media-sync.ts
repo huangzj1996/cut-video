@@ -25,7 +25,7 @@ export function pauseMediaElement(element: HTMLMediaElement): void {
   }
 }
 
-export function syncMediaPlayState(element: HTMLMediaElement, playing: boolean): void {
+function syncMediaPlayState(element: HTMLMediaElement, playing: boolean): void {
   if (!playing) {
     pauseMediaElement(element);
     return;
@@ -51,28 +51,22 @@ export function alignMediaElement(
   syncMediaPlayState(element, playing);
 }
 
-export function loadMediaSource(
-  element: HTMLMediaElement,
-  assetId: string,
-  projectId: string,
-): void {
+function loadMediaSource(element: HTMLMediaElement, assetId: string, projectId: string): void {
   element.dataset.assetId = assetId;
   element.src = assetUrl(projectId, assetId);
   element.load();
 }
 
-type PlayableSlot = { assetId: string | null };
-
 export function applySlotSource(
   element: HTMLVideoElement | null,
-  slot: PlayableSlot,
+  assetId: string | null,
   projectId: string,
 ): void {
   if (!element) {
     return;
   }
 
-  if (!slot.assetId) {
+  if (!assetId) {
     if (element.dataset.assetId) {
       delete element.dataset.assetId;
       element.removeAttribute('src');
@@ -82,8 +76,8 @@ export function applySlotSource(
     return;
   }
 
-  if (element.dataset.assetId !== slot.assetId) {
-    loadMediaSource(element, slot.assetId, projectId);
+  if (element.dataset.assetId !== assetId) {
+    loadMediaSource(element, assetId, projectId);
   }
 }
 

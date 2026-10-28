@@ -123,7 +123,8 @@ export function findClipAtSeconds<T extends ClippedMs>(
 
   const last = clips[clips.length - 1];
 
-  if (last && timeMs === last.endMs && timeMs >= last.startMs) {
+  // endMs > startMs（schema 保证），因此命中末尾即落在片段内。
+  if (last && timeMs === last.endMs) {
     return last;
   }
 

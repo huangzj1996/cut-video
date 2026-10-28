@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { VideoProject } from '@miaoma/video-project';
+import { alignMediaElement, syncAudioElement } from './media-sync';
 import {
   audioReachedSourceEnd,
   buildPreviewMediaPlan,
@@ -9,6 +10,7 @@ import {
   resolveMusicSourceSeconds,
   resolveVideoSourceSeconds,
   resolveVoiceSourceSeconds,
+  trackHasClips,
 } from './preview-media';
 
 function makeProject(): VideoProject {
@@ -243,6 +245,43 @@ function makeProject(): VideoProject {
   };
 }
 
+interface FakeMediaElement {
+  currentTime: number;
+  dataset: Record<string, string | undefined>;
+  muted: boolean;
+  paused: boolean;
+  playbackRate: number;
+  src: string;
+  volume: number;
+  load: () => undefined;
+  pause: () => void;
+  play: () => Promise<void>;
+  removeAttribute: () => undefined;
+}
+
+/** 预览层用到的媒体元素属性集合；假元素让三类媒体可以被一起断言。 */
+function createFakeMediaElement(currentTime: number, loadedAssetId: string): FakeMediaElement {
+  return {
+    currentTime,
+    dataset: { assetId: loadedAssetId },
+    load: () => undefined,
+    muted: false,
+    pause() {
+      this.paused = true;
+    },
+    paused: true,
+    play() {
+      this.paused = false;
+
+      return Promise.resolve();
+    },
+    playbackRate: 1,
+    removeAttribute: () => undefined,
+    src: `asset://project-1/${loadedAssetId}`,
+    volume: 1,
+  };
+}
+
 function withVideoAsset(project: VideoProject, assetId: string): VideoProject {
   return {
     ...project,
@@ -289,6 +328,15 @@ describe('buildPreviewMediaPlan video', () => {
     expect(buildPreviewMediaPlan(project, 5).nextVideo).toBeNull();
   });
 
+  it('does not preload a next clip that cannot be played directly', () => {
+    const plan = buildPreviewMediaPlan(withVideoAsset(makeProject(), 'video-hevc'), 1);
+
+    // 当前 H.264 片段照常播放，但不把 HEVC 片段塞进预加载槽位。
+    expect(plan.video).toMatchObject({ clipId: 'clip-video-1' });
+    expect(plan.videoIssue).toBeNull();
+    expect(plan.nextVideo).toBeNull();
+  });
+
   it('treats image clips as static media with no source offset', () => {
     const plan = buildPreviewMediaPlan(withVideoAsset(makeProject(), 'image-1'), 5);
 
@@ -314,6 +362,20 @@ describe('describeVideoIssue', () => {
   it('plays H.264 MP4/MOV directly', () => {
     expect(describeVideoIssue(h264!)).toBeNull();
     expect(describeVideoIssue(mov!)).toBeNull();
+  });
+
+  it('plays sources recorded before the codec field existed', () => {
+    const { codec: _codec, ...legacyH264 } = h264!;
+
+    expect(describeVideoIssue(legacyH264)).toBeNull();
+  });
+
+  it('accepts codec aliases and case-insensitive container extensions', () => {
+    expect(describeVideoIssue({ ...h264!, codec: 'avc' })).toBeNull();
+    expect(describeVideoIssue({ ...h264!, codec: 'avc1' })).toBeNull();
+    expect(describeVideoIssue({ ...h264!, codec: 'AVC' })).toBeNull();
+    expect(describeVideoIssue({ ...h264!, path: '/media/clip.m4v' })).toBeNull();
+    expect(describeVideoIssue({ ...mov!, path: '/media/second.MOV' })).toBeNull();
   });
 
   it('explains unsupported codecs, HDR, VFR, and containers', () => {
@@ -457,5 +519,57 @@ describe('buildPreviewMediaPlan audio', () => {
     expect(plan.audioIssues).toEqual([
       expect.objectContaining({ kind: 'missing-asset', assetId: 'voice-1' }),
     ]);
+  });
+});
+
+describe('trackHasClips', () => {
+  it('reports the voice and music tracks that carry clips', () => {
+    const project = makeProject();
+
+    expect(trackHasClips(project, 'voice')).toBe(true);
+    expect(trackHasClips(project, 'music')).toBe(true);
+  });
+
+  it('reports an empty music track so the preview mounts no audio element', () => {
+    const project = makeProject();
+
+    project.tracks = project.tracks.map((track) =>
+      track.kind === 'music' ? { ...track, clips: [] } : track,
+    );
+
+    expect(trackHasClips(project, 'music')).toBe(false);
+  });
+
+  it('reports a missing voice track without affecting the music track', () => {
+    const project = makeProject();
+
+    project.tracks = project.tracks.filter((track) => track.kind !== 'voice');
+
+    expect(trackHasClips(project, 'voice')).toBe(false);
+    expect(trackHasClips(project, 'music')).toBe(true);
+  });
+});
+
+describe('preview seek alignment', () => {
+  it('lands video, voice, and music on their mapped source times from one paused seek', () => {
+    const plan = buildPreviewMediaPlan(makeProject(), 2);
+
+    // 三类媒体都已经加载好当前素材，模拟播放中暂停在 2s 后的统一 seek。
+    const videoPlan = plan.video!;
+    const video = createFakeMediaElement(0, 'video-1');
+    const voice = createFakeMediaElement(0, 'voice-1');
+    const music = createFakeMediaElement(0, 'music-1');
+
+    // 与 PreviewStage 相同：活动视频先应用倍速，再对齐 source 时间。
+    video.playbackRate = videoPlan.playbackRate;
+    alignMediaElement(video as unknown as HTMLMediaElement, videoPlan.sourceSeconds, false);
+    syncAudioElement(voice as unknown as HTMLAudioElement, plan.voice, 'project-1', false, false);
+    syncAudioElement(music as unknown as HTMLAudioElement, plan.music, 'project-1', false, false);
+
+    // 时间线 2s 的独立换算：视频从素材 2s 起以 2x 播放 → 6s；
+    // 配音片段从起点播放 → 2s；音乐源区间从 5s 起且有 2s 偏移 → 7s。
+    expect([video.currentTime, voice.currentTime, music.currentTime]).toEqual([6, 2, 7]);
+    expect([video.paused, voice.paused, music.paused]).toEqual([true, true, true]);
+    expect(video.playbackRate).toBe(2);
   });
 });

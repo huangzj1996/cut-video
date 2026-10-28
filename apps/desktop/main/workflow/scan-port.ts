@@ -71,6 +71,7 @@ function toProbeSummary(metadata: {
   codec?: string;
   bitRate?: number;
   audio?: unknown;
+  isHdr: boolean;
   isVfr: boolean;
   rotation: number;
 }): AssetProbeSummary {
@@ -85,6 +86,7 @@ function toProbeSummary(metadata: {
       ? { bitRate: Math.max(0, Math.round(metadata.bitRate)) }
       : {}),
     hasAudio: metadata.audio !== undefined,
+    isHdr: metadata.isHdr,
     isVfr: metadata.isVfr,
     rotation: Math.round(metadata.rotation),
   };

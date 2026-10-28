@@ -18,6 +18,9 @@ export const AnalyzedAssetTechnicalSchema = z.strictObject({
   durationLabel: z.string().trim().min(1).max(40),
   hasAudio: z.boolean(),
   isVfr: z.boolean(),
+  // inferred：预览需要知道编码与 HDR 才能给出明确的占位原因
+  codec: z.string().trim().min(1).max(80).optional(),
+  isHdr: z.boolean().optional(),
 });
 
 export type AnalyzedAssetTechnical = z.infer<typeof AnalyzedAssetTechnicalSchema>;

@@ -29,11 +29,16 @@ const speedSchema = z.number().min(0.5).max(2);
 
 export const VideoAssetSchema = z
   .object({
+    // inferred：预览/导出需要判断能否直接播放（v1 只直接支持 H.264/AAC）
+    codec: z.string().min(1).max(80).optional(),
     durationMs: TimeMsSchema,
     // inferred：图片素材没有帧率；视频素材由 refine 强制要求
     fps: z.number().positive().optional(),
     height: z.number().int().positive(),
     id: IdSchema,
+    // inferred：HDR / VFR 素材 v1 不保证直接预览
+    isHdr: z.boolean().optional(),
+    isVfr: z.boolean().optional(),
     // inferred：需求 §7.1/T14 要求图片静态片段，需要区分视频与图片
     mediaType: z.enum(['video', 'image']),
     path: z.string().min(1),

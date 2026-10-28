@@ -1,6 +1,6 @@
 /**
  * 项目级编辑器。左侧分镜、工程名、四轨时间线都来自最新 `project.json`；
- * 媒体通过受限 `asset://` 协议加载，预览播放由后续切片接入。
+ * 媒体通过受限 `asset://` 协议加载，预览由主时钟同步播放视频、配音和音乐。
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {
@@ -17,7 +17,9 @@ import {
   type EditorLoadResult,
   type EditorProjectView,
 } from './editor-video/project-view';
+import { parseTimecode } from './editor-video/playback';
 import { PreviewStage } from './editor-video/PreviewStage';
+import { buildPreviewMediaPlan, trackHasClips } from './editor-video/preview-media';
 import { createSelection, selectionReducer } from './editor-video/selection';
 import {
   buildEditorTimeline,
@@ -27,13 +29,8 @@ import {
   type EditorTrackView,
   type TimelineTrackClip,
 } from './editor-video/timeline-geometry';
-import {
-  clampTime,
-  clientXToTime,
-  formatTime,
-  secondsToPercent,
-  type TimelineClip,
-} from './editor-video/timeline';
+import { clampTime, clientXToTime, formatTime, secondsToPercent } from './editor-video/timeline';
+import { usePlaybackClock } from './editor-video/usePlaybackClock';
 import { EditorIcon, type EditorIconName } from './editor-icons';
 import { MusicPanel } from './panels/MusicPanel';
 import { SubtitlePanel } from './panels/SubtitlePanel';
@@ -173,14 +170,17 @@ export function EditorVideoScreen({ projectId }: { projectId: string }) {
 function EditorWorkspace({ project, view }: { project: VideoProject; view: EditorProjectView }) {
   const timeline = useMemo(() => buildEditorTimeline(project), [project]);
   const spanSeconds = timeline.durationSeconds > 0 ? timeline.durationSeconds : 1;
+  const { currentTime, pause, playing, seek, toggle } = usePlaybackClock(timeline.durationSeconds);
   const [selection, dispatch] = useReducer(
     selectionReducer,
     view.scenes[0]?.id ?? null,
     (sceneId) => createSelection(sceneId),
   );
   const [activeRail, setActiveRail] = useState<EditorRailId>('video');
-  const [currentTime, setCurrentTime] = useState(0);
-  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [timecodeEditing, setTimecodeEditing] = useState(false);
+  const [timecodeDraft, setTimecodeDraft] = useState('');
   const [contextOpen, setContextOpen] = useState(true);
   const [quickOpen, setQuickOpen] = useState(true);
   const [draft, setDraft] = useState('');
@@ -194,6 +194,7 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
   const [isScrubbing, setIsScrubbing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rulerTrackRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const activePointerIdRef = useRef<number | null>(null);
   const grabOffsetRef = useRef(0);
   const noticeTimer = useRef<number | null>(null);
@@ -202,17 +203,12 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
   const selectedName = selectedScene?.title ?? '未选择分镜';
   const selectedRange = selectedScene?.rangeLabel ?? '—';
   const playheadRatio = Math.min(1, Math.max(0, currentTime / spanSeconds));
-  const previewClips = useMemo<readonly TimelineClip[]>(() => {
-    const videoTrack = timeline.tracks.find((track) => track.kind === 'video');
-
-    return (videoTrack?.clips ?? []).map((clip, index) => ({
-      ...videoTone(index),
-      endSeconds: clip.endSeconds,
-      id: clip.id,
-      label: clip.label,
-      startSeconds: clip.startSeconds,
-    }));
-  }, [timeline]);
+  const previewPlan = useMemo(
+    () => buildPreviewMediaPlan(project, currentTime),
+    [currentTime, project],
+  );
+  const hasVoiceTrack = useMemo(() => trackHasClips(project, 'voice'), [project]);
+  const hasMusicTrack = useMemo(() => trackHasClips(project, 'music'), [project]);
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -235,26 +231,6 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     };
   }, []);
 
-  useEffect(() => {
-    if (!playing) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setCurrentTime((time) => Math.min(spanSeconds, time + 0.1));
-    }, 100);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [playing, spanSeconds]);
-
-  useEffect(() => {
-    if (playing && currentTime >= spanSeconds) {
-      setPlaying(false);
-    }
-  }, [currentTime, playing, spanSeconds]);
-
   const seekFromClientX = useCallback(
     (clientX: number, offsetSeconds: number) => {
       const rect = rulerTrackRef.current?.getBoundingClientRect();
@@ -265,9 +241,9 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
 
       const time = clientXToTime(clientX, rect, spanSeconds) + offsetSeconds;
 
-      setCurrentTime(clampTime(time, spanSeconds));
+      seek(clampTime(time, spanSeconds));
     },
-    [spanSeconds],
+    [seek, spanSeconds],
   );
 
   const endScrub = useCallback((event?: ReactPointerEvent<HTMLDivElement>) => {
@@ -292,7 +268,7 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     }
 
     event.preventDefault();
-    setPlaying(false);
+    pause();
     rulerTrackRef.current?.focus({ preventScroll: true });
 
     if (activePointerIdRef.current !== null) {
@@ -355,8 +331,8 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     }
 
     event.preventDefault();
-    setPlaying(false);
-    setCurrentTime(clampTime(nextTime, spanSeconds));
+    pause();
+    seek(clampTime(nextTime, spanSeconds));
   };
 
   const scrollToBottom = () => {
@@ -401,10 +377,57 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
     selection.clip?.id === clip.id && selection.clip.kind === clip.kind;
 
   const selectScene = (sceneId: string, startSeconds: number) => {
-    setPlaying(false);
-    setCurrentTime(clampTime(startSeconds, spanSeconds));
+    pause();
+    seek(clampTime(startSeconds, spanSeconds));
     dispatch({ sceneId, type: 'select-scene' });
   };
+
+  const beginTimecodeEdit = () => {
+    setTimecodeDraft(formatTime(currentTime));
+    setTimecodeEditing(true);
+  };
+
+  const commitTimecode = () => {
+    const seconds = parseTimecode(timecodeDraft);
+
+    if (seconds === null) {
+      notify('时间码格式无效，请使用 HH:MM:SS。');
+    } else {
+      pause();
+      seek(clampTime(seconds, spanSeconds));
+    }
+
+    setTimecodeEditing(false);
+  };
+
+  const toggleFullscreen = () => {
+    const stage = stageRef.current;
+
+    if (!stage) {
+      return;
+    }
+
+    if (document.fullscreenElement === stage) {
+      void document.exitFullscreen();
+      return;
+    }
+
+    void stage.requestFullscreen().catch(() => {
+      notify('当前环境不支持全屏预览。');
+    });
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setFullscreen(document.fullscreenElement === stageRef.current);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   const clipStyle = (clip: TimelineTrackClip) => ({
     left: `${secondsToPercent(clip.startSeconds, spanSeconds)}%`,
@@ -590,45 +613,71 @@ function EditorWorkspace({ project, view }: { project: VideoProject; view: Edito
 
         <section className="ed-center" aria-label="视频预览">
           <PreviewStage
-            clips={previewClips}
             currentTime={currentTime}
-            projectSeconds={spanSeconds}
+            hasMusicTrack={hasMusicTrack}
+            hasVoiceTrack={hasVoiceTrack}
+            muted={muted}
+            plan={previewPlan}
+            playing={playing}
+            projectId={view.projectId}
+            stageRef={stageRef}
           />
           <div className="ed-preview-bar">
-            <span className="ed-preview-time">
-              {formatTime(currentTime)} <span>/ {formatTime(spanSeconds)}</span>
-            </span>
+            {timecodeEditing ? (
+              <input
+                autoFocus
+                aria-label="跳转时间码"
+                className="ed-preview-time-input"
+                onBlur={commitTimecode}
+                onChange={(event) => setTimecodeDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitTimecode();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setTimecodeEditing(false);
+                  }
+                }}
+                value={timecodeDraft}
+              />
+            ) : (
+              <button
+                aria-label={`当前时间 ${formatTime(currentTime)}，点击输入时间码`}
+                className="ed-preview-time"
+                onClick={beginTimecodeEdit}
+                type="button"
+              >
+                {formatTime(currentTime)} <span>/ {formatTime(spanSeconds)}</span>
+              </button>
+            )}
 
             <button
               className="ed-play"
               type="button"
               aria-label={playing ? '暂停' : '播放'}
               aria-pressed={playing}
-              onClick={() => {
-                if (currentTime >= spanSeconds) {
-                  setCurrentTime(0);
-                }
-
-                setPlaying((value) => !value);
-              }}
+              onClick={toggle}
             >
               <EditorIcon name={playing ? 'pause' : 'play'} size={24} />
             </button>
 
             <div className="ed-preview-tools">
               <button
-                className="ed-preview-tool"
+                className={`ed-preview-tool${muted ? ' is-active' : ''}`}
                 type="button"
-                aria-label="音量"
-                onClick={() => notify('音量控制将在 T18 接入。')}
+                aria-label={muted ? '取消静音' : '静音'}
+                aria-pressed={muted}
+                onClick={() => setMuted((value) => !value)}
               >
-                <EditorIcon name="volume" size={18} />
+                <EditorIcon name={muted ? 'volume-off' : 'volume'} size={18} />
               </button>
               <button
-                className="ed-preview-tool"
+                className={`ed-preview-tool${fullscreen ? ' is-active' : ''}`}
                 type="button"
-                aria-label="全屏预览"
-                onClick={() => notify('全屏预览将在 T18 接入。')}
+                aria-label={fullscreen ? '退出全屏' : '全屏预览'}
+                aria-pressed={fullscreen}
+                onClick={toggleFullscreen}
               >
                 <EditorIcon name="expand" size={18} />
               </button>

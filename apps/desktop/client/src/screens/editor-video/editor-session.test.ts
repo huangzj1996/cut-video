@@ -22,7 +22,7 @@ function trim(clipId: string, deltaMs: number): EditorSessionAction {
 }
 
 function split(atMs: number): EditorSessionAction {
-  return { action: { atMs, type: 'split-video' }, type: 'edit' };
+  return { action: { atMs, clipId: 'clip-video-1', type: 'split-video' }, type: 'edit' };
 }
 
 function deleteClip(clipId: string): EditorSessionAction {

@@ -36,16 +36,9 @@ export type EditAction =
       deltaMs: number;
     }
   | {
-      /** 在播放头处的视频片段内部一分为二。 */
+      /** 在播放头处把选中的视频片段一分为二；播放头必须落在该片段内部。 */
       type: 'split-video';
-      atMs: number;
-    }
-  | {
-      /**
-       * 播放头处一刀切：视频片段与覆盖播放头的音乐片段在同一次编辑里切开，
-       * 撤销栈里只算一步；没有音乐时等价于只切视频。
-       */
-      type: 'split-at-playhead';
+      clipId: string;
       atMs: number;
     }
   | {
@@ -769,17 +762,22 @@ function uniqueClipId(project: VideoProject, baseId: string): string {
   return candidate;
 }
 
-/** 在播放头处把视频片段一分为二：两段共享切点，source 区间首尾相接。 */
-function splitVideoClip(project: VideoProject, atMs: number): EditResult {
+/** 在播放头处把选中的视频片段一分为二：两段共享切点，source 区间首尾相接。 */
+function splitVideoClip(project: VideoProject, clipId: string, atMs: number): EditResult {
   if (!Number.isInteger(atMs)) {
     return reject('EDIT_SPLIT_OUTSIDE_CLIP', '播放头不在视频片段内部，无法分割。');
   }
 
   const videoClips = findTrack(project, 'video')?.clips ?? [];
-  const target = videoClips.find((clip) => clip.startMs < atMs && atMs < clip.endMs);
+  const target = videoClips.find((clip) => clip.id === clipId);
 
   if (!target) {
-    return reject('EDIT_SPLIT_OUTSIDE_CLIP', '播放头不在任何视频片段内部，无法分割。');
+    return reject('EDIT_CLIP_NOT_FOUND', '找不到选中的视频片段。');
+  }
+
+  // 播放头必须落在选中的这一片段内部；不允许切到播放头下的其他片段。
+  if (!(target.startMs < atMs && atMs < target.endMs)) {
+    return reject('EDIT_SPLIT_OUTSIDE_CLIP', '播放头不在选中的视频片段内部，无法分割。');
   }
 
   const speed = target.speed ?? 1;
@@ -1141,36 +1139,6 @@ function splitMusicClip(project: VideoProject, clipId: string, atMs: number): Ed
   });
 }
 
-/**
- * 播放头处一刀切：先切视频，再切覆盖播放头的音乐片段，合成一次编辑，撤销一步。
- * 视频切不动（播放头不在视频片段内部）时仍尝试音乐；两者都没切到才返回拒绝。
- */
-function splitAtPlayhead(project: VideoProject, atMs: number): EditResult {
-  const videoResult = splitVideoClip(project, atMs);
-  let nextProject = videoResult.ok ? videoResult.project : project;
-  let changed = videoResult.ok && videoResult.changed;
-
-  const musicClip = findTrack(nextProject, 'music')?.clips.find(
-    (clip) => clip.startMs < atMs && atMs < clip.endMs,
-  );
-
-  if (musicClip) {
-    const musicResult = splitMusicClip(nextProject, musicClip.id, atMs);
-
-    if (musicResult.ok) {
-      nextProject = musicResult.project;
-      changed = changed || musicResult.changed;
-    }
-  }
-
-  // 一次都没切到：把视频的拒绝理由原样返回，界面提示保持具体。
-  if (!changed) {
-    return videoResult;
-  }
-
-  return commitEdit(project, nextProject);
-}
-
 function deleteMusicClip(project: VideoProject, clipId: string): EditResult {
   const track = findTrack(project, 'music');
 
@@ -1247,10 +1215,7 @@ export function applyEdit(project: VideoProject, action: EditAction): EditResult
       return trimVideoClip(project, action.clipId, action.deltaMs);
 
     case 'split-video':
-      return splitVideoClip(project, action.atMs);
-
-    case 'split-at-playhead':
-      return splitAtPlayhead(project, action.atMs);
+      return splitVideoClip(project, action.clipId, action.atMs);
 
     case 'delete-clip': {
       const clip = findClipById(project, action.clipId);

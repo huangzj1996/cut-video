@@ -1029,9 +1029,34 @@ function EditorWorkspace({
     setTrimPreview(null);
   };
 
-  /** 播放头处一刀切：视频与覆盖播放头的音乐片段在同一次编辑里分割，撤销一步。 */
-  const splitAtPlayhead = () => {
-    performEdit({ atMs: Math.round(currentTime * 1_000), type: 'split-at-playhead' });
+  /**
+   * 分割按钮按当前选中的片段类型路由：选中视频片段切视频、选中音乐片段切音乐。
+   * 播放头必须落在选中的片段内部，越界由编辑管线拒绝并提示。
+   */
+  const selectedClip = selection.clip;
+  const splitTargetKind =
+    selectedClip?.kind === 'video' || selectedClip?.kind === 'music' ? selectedClip.kind : null;
+  const canSplitSelection = !session.readonly && splitTargetKind !== null;
+  const splitTitle = session.readonly
+    ? '编辑器只读，无法分割'
+    : splitTargetKind === 'video'
+      ? '在播放头处分割选中的视频片段'
+      : splitTargetKind === 'music'
+        ? '在播放头处分割选中的音乐片段'
+        : selectedClip
+          ? '字幕/配音片段不支持分割'
+          : '先选中视频或音乐片段再分割';
+
+  const splitSelection = () => {
+    if (!selectedClip || !splitTargetKind) {
+      return;
+    }
+
+    performEdit({
+      atMs: Math.round(currentTime * 1_000),
+      clipId: selectedClip.id,
+      type: splitTargetKind === 'video' ? 'split-video' : 'split-music-clip',
+    });
   };
 
   const resetClipDrag = useCallback(() => {
@@ -1797,10 +1822,10 @@ function EditorWorkspace({
             <button
               className="ed-icon-button"
               type="button"
-              aria-label="在播放头处分割"
-              title="在播放头处分割视频与音乐（一次切开两个轨道，撤销一步）"
-              disabled={session.readonly}
-              onClick={splitAtPlayhead}
+              aria-label="分割选中的片段"
+              title={splitTitle}
+              disabled={!canSplitSelection}
+              onClick={splitSelection}
             >
               <EditorIcon name="split" size={15} />
             </button>

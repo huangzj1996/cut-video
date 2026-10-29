@@ -929,7 +929,9 @@ describe('applyEdit trim-video', () => {
   it('only lets the trailing video clip of a scene move the scene end', () => {
     const project = createEditingProject();
 
-    const split = expectOk(edit(project, { atMs: 2_000, type: 'split-video' }));
+    const split = expectOk(
+      edit(project, { atMs: 2_000, clipId: 'clip-video-1', type: 'split-video' }),
+    );
     const firstClip = videoTrackClips(split.project)[0];
 
     expect(firstClip?.id).toBe('clip-video-1');
@@ -978,10 +980,12 @@ describe('applyEdit trim-video', () => {
 });
 
 describe('applyEdit split-video', () => {
-  it('splits the video clip under the playhead into two source-contiguous clips', () => {
+  it('splits the selected video clip under the playhead into two source-contiguous clips', () => {
     const project = createEditingProject();
 
-    const result = expectOk(edit(project, { atMs: 2_000, type: 'split-video' }));
+    const result = expectOk(
+      edit(project, { atMs: 2_000, clipId: 'clip-video-1', type: 'split-video' }),
+    );
     const videoClips = videoTrackClips(result.project);
 
     expect(result.changed).toBe(true);
@@ -1005,108 +1009,47 @@ describe('applyEdit split-video', () => {
     ]);
   });
 
-  it('keeps splitting the same scene into unique clip ids with contiguous source ranges', () => {
+  it('keeps splitting the same clip into unique ids with contiguous source ranges', () => {
     const project = createEditingProject();
 
-    const first = expectOk(edit(project, { atMs: 1_000, type: 'split-video' }));
-    const second = expectOk(edit(first.project, { atMs: 3_000, type: 'split-video' }));
+    const first = expectOk(
+      edit(project, { atMs: 2_000, clipId: 'clip-video-1', type: 'split-video' }),
+    );
+    const second = expectOk(
+      edit(first.project, { atMs: 1_000, clipId: 'clip-video-1', type: 'split-video' }),
+    );
     const sceneOne = videoTrackClips(second.project).filter((clip) => clip.sceneId === 'scene-1');
 
-    expect(sceneOne.map((clip) => clipSpan(clip))).toEqual(['0-1000', '1000-3000', '3000-4000']);
+    expect(sceneOne.map((clip) => clipSpan(clip))).toEqual(['0-1000', '1000-2000', '2000-4000']);
     expect(sceneOne.map((clip) => `${clip.sourceStartMs}-${clip.sourceEndMs}`)).toEqual([
       '0-1000',
-      '1000-3000',
-      '3000-4000',
+      '1000-2000',
+      '2000-4000',
     ]);
     expect(new Set(sceneOne.map((clip) => clip.id)).size).toBe(3);
     expect(findInvariantViolations(second.project)).toEqual([]);
   });
 
-  it('rejects a split outside any video clip without touching the document', () => {
-    const project = createEditingProject();
-    const before = structuredClone(project);
-
-    expectRejected(edit(project, { atMs: 0, type: 'split-video' }), 'EDIT_SPLIT_OUTSIDE_CLIP');
-    expectRejected(edit(project, { atMs: 4_000, type: 'split-video' }), 'EDIT_SPLIT_OUTSIDE_CLIP');
-    expectRejected(edit(project, { atMs: 13_000, type: 'split-video' }), 'EDIT_SPLIT_OUTSIDE_CLIP');
-    expect(project).toEqual(before);
-  });
-});
-
-describe('applyEdit split-at-playhead', () => {
-  it('splits the video and the music clip under the playhead in one edit', () => {
-    const project = createEditingProject();
-
-    const result = expectOk(edit(project, { atMs: 2_000, type: 'split-at-playhead' }));
-
-    expect(result.changed).toBe(true);
-    expect(videoTrackClips(result.project).map((clip) => clipSpan(clip))).toEqual([
-      '0-2000',
-      '2000-4000',
-      '4000-7000',
-      '7000-12000',
-    ]);
-    expect(
-      musicTrackClips(result.project).map(
-        (clip) => `${clipSpan(clip)} src ${clip.sourceStartMs}-${clip.sourceEndMs}`,
-      ),
-    ).toEqual(['0-2000 src 0-2000', '2000-12000 src 2000-12000']);
-    expect(findInvariantViolations(result.project)).toEqual([]);
-  });
-
-  it('splits only the video when the playhead is not over any music clip', () => {
-    const project = withMusicClips(createEditingProject(), []);
-
-    const result = expectOk(edit(project, { atMs: 2_000, type: 'split-at-playhead' }));
-
-    expect(videoTrackClips(result.project)).toHaveLength(4);
-    expect(musicTrackClips(result.project)).toEqual([]);
-  });
-
-  it('keeps the video split when the music clip is too close to its edge', () => {
-    const project = withMusicClips(createEditingProject(), [
-      {
-        assetId: 'music-1',
-        endMs: 12_000,
-        id: 'clip-music-1',
-        kind: 'music',
-        loop: false,
-        sourceEndMs: 10_050,
-        sourceStartMs: 0,
-        startMs: 1_950,
-      },
-    ]);
-
-    const result = expectOk(edit(project, { atMs: 2_000, type: 'split-at-playhead' }));
-
-    expect(videoTrackClips(result.project)).toHaveLength(4);
-    expect(musicTrackClips(result.project)).toHaveLength(1);
-    expect(findInvariantViolations(result.project)).toEqual([]);
-  });
-
-  it('splits the music even when the playhead sits on a video scene boundary', () => {
-    const project = createEditingProject();
-
-    const result = expectOk(edit(project, { atMs: 4_000, type: 'split-at-playhead' }));
-
-    expect(videoTrackClips(result.project)).toHaveLength(3);
-    expect(musicTrackClips(result.project).map((clip) => clipSpan(clip))).toEqual([
-      '0-4000',
-      '4000-12000',
-    ]);
-  });
-
-  it('rejects when neither track can be split and leaves the document untouched', () => {
+  it('rejects a playhead outside the selected clip without touching the document', () => {
     const project = createEditingProject();
     const before = structuredClone(project);
 
     expectRejected(
-      edit(project, { atMs: 0, type: 'split-at-playhead' }),
+      edit(project, { atMs: 0, clipId: 'clip-video-1', type: 'split-video' }),
       'EDIT_SPLIT_OUTSIDE_CLIP',
     );
     expectRejected(
-      edit(project, { atMs: 12_000, type: 'split-at-playhead' }),
+      edit(project, { atMs: 4_000, clipId: 'clip-video-1', type: 'split-video' }),
       'EDIT_SPLIT_OUTSIDE_CLIP',
+    );
+    // 播放头在 clip-video-2 里、但选中的是 clip-video-1：不允许切到别的片段。
+    expectRejected(
+      edit(project, { atMs: 5_000, clipId: 'clip-video-1', type: 'split-video' }),
+      'EDIT_SPLIT_OUTSIDE_CLIP',
+    );
+    expectRejected(
+      edit(project, { atMs: 2_000, clipId: 'missing-clip', type: 'split-video' }),
+      'EDIT_CLIP_NOT_FOUND',
     );
     expect(project).toEqual(before);
   });

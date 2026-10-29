@@ -1033,6 +1033,85 @@ describe('applyEdit split-video', () => {
   });
 });
 
+describe('applyEdit split-at-playhead', () => {
+  it('splits the video and the music clip under the playhead in one edit', () => {
+    const project = createEditingProject();
+
+    const result = expectOk(edit(project, { atMs: 2_000, type: 'split-at-playhead' }));
+
+    expect(result.changed).toBe(true);
+    expect(videoTrackClips(result.project).map((clip) => clipSpan(clip))).toEqual([
+      '0-2000',
+      '2000-4000',
+      '4000-7000',
+      '7000-12000',
+    ]);
+    expect(
+      musicTrackClips(result.project).map(
+        (clip) => `${clipSpan(clip)} src ${clip.sourceStartMs}-${clip.sourceEndMs}`,
+      ),
+    ).toEqual(['0-2000 src 0-2000', '2000-12000 src 2000-12000']);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('splits only the video when the playhead is not over any music clip', () => {
+    const project = withMusicClips(createEditingProject(), []);
+
+    const result = expectOk(edit(project, { atMs: 2_000, type: 'split-at-playhead' }));
+
+    expect(videoTrackClips(result.project)).toHaveLength(4);
+    expect(musicTrackClips(result.project)).toEqual([]);
+  });
+
+  it('keeps the video split when the music clip is too close to its edge', () => {
+    const project = withMusicClips(createEditingProject(), [
+      {
+        assetId: 'music-1',
+        endMs: 12_000,
+        id: 'clip-music-1',
+        kind: 'music',
+        loop: false,
+        sourceEndMs: 10_050,
+        sourceStartMs: 0,
+        startMs: 1_950,
+      },
+    ]);
+
+    const result = expectOk(edit(project, { atMs: 2_000, type: 'split-at-playhead' }));
+
+    expect(videoTrackClips(result.project)).toHaveLength(4);
+    expect(musicTrackClips(result.project)).toHaveLength(1);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('splits the music even when the playhead sits on a video scene boundary', () => {
+    const project = createEditingProject();
+
+    const result = expectOk(edit(project, { atMs: 4_000, type: 'split-at-playhead' }));
+
+    expect(videoTrackClips(result.project)).toHaveLength(3);
+    expect(musicTrackClips(result.project).map((clip) => clipSpan(clip))).toEqual([
+      '0-4000',
+      '4000-12000',
+    ]);
+  });
+
+  it('rejects when neither track can be split and leaves the document untouched', () => {
+    const project = createEditingProject();
+    const before = structuredClone(project);
+
+    expectRejected(
+      edit(project, { atMs: 0, type: 'split-at-playhead' }),
+      'EDIT_SPLIT_OUTSIDE_CLIP',
+    );
+    expectRejected(
+      edit(project, { atMs: 12_000, type: 'split-at-playhead' }),
+      'EDIT_SPLIT_OUTSIDE_CLIP',
+    );
+    expect(project).toEqual(before);
+  });
+});
+
 describe('applyEdit blocked structural edits', () => {
   it('blocks deleting video and voice clips with a pointer back to the creation page', () => {
     const project = createEditingProject();

@@ -1029,8 +1029,9 @@ function EditorWorkspace({
     setTrimPreview(null);
   };
 
+  /** 播放头处一刀切：视频与覆盖播放头的音乐片段在同一次编辑里分割，撤销一步。 */
   const splitAtPlayhead = () => {
-    performEdit({ atMs: Math.round(currentTime * 1_000), type: 'split-video' });
+    performEdit({ atMs: Math.round(currentTime * 1_000), type: 'split-at-playhead' });
   };
 
   const resetClipDrag = useCallback(() => {
@@ -1189,40 +1190,6 @@ function EditorWorkspace({
       dispatch({ sceneId: selection.sceneId, type: 'select-scene' });
     }
   }, [notify, performEdit, selection.clip, selection.sceneId, session.readonly]);
-
-  const splitSelectedMusic = useCallback(() => {
-    const selected = selection.clip;
-
-    if (session.readonly) {
-      notify('编辑器只读，无法分割片段。');
-      return;
-    }
-
-    if (!selected || selected.kind !== 'music') {
-      notify('先在时间线上选中一段音乐，再在播放头处分割。');
-      return;
-    }
-
-    pause();
-    performEdit({
-      atMs: Math.round(currentTime * 1_000),
-      clipId: selected.id,
-      type: 'split-music-clip',
-    });
-  }, [currentTime, notify, pause, performEdit, selection.clip, session.readonly]);
-
-  /**
-   * 工具栏只保留一个分割按钮：选中音乐片段时分割音乐，否则在播放头处分割视频。
-   * （此前并排放了两个一模一样的剪刀图标，容易误点。）
-   */
-  const splitAtPlayheadOrSelection = (): void => {
-    if (selection.clip?.kind === 'music') {
-      splitSelectedMusic();
-      return;
-    }
-
-    splitAtPlayhead();
-  };
 
   const canEditSelectedClip =
     !session.readonly && (selection.clip?.kind === 'subtitle' || selection.clip?.kind === 'music');
@@ -1831,9 +1798,9 @@ function EditorWorkspace({
               className="ed-icon-button"
               type="button"
               aria-label="在播放头处分割"
-              title="在播放头处分割（选中音乐片段时分割音乐，否则分割视频）"
+              title="在播放头处分割视频与音乐（一次切开两个轨道，撤销一步）"
               disabled={session.readonly}
-              onClick={splitAtPlayheadOrSelection}
+              onClick={splitAtPlayhead}
             >
               <EditorIcon name="split" size={15} />
             </button>

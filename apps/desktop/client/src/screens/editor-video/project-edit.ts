@@ -41,6 +41,14 @@ export type EditAction =
       atMs: number;
     }
   | {
+      /**
+       * 播放头处一刀切：视频片段与覆盖播放头的音乐片段在同一次编辑里切开，
+       * 撤销栈里只算一步；没有音乐时等价于只切视频。
+       */
+      type: 'split-at-playhead';
+      atMs: number;
+    }
+  | {
       /** 删除片段；视频/配音一律被拒绝，字幕/音乐用下面的专用动作。 */
       type: 'delete-clip';
       clipId: string;
@@ -1133,6 +1141,36 @@ function splitMusicClip(project: VideoProject, clipId: string, atMs: number): Ed
   });
 }
 
+/**
+ * 播放头处一刀切：先切视频，再切覆盖播放头的音乐片段，合成一次编辑，撤销一步。
+ * 视频切不动（播放头不在视频片段内部）时仍尝试音乐；两者都没切到才返回拒绝。
+ */
+function splitAtPlayhead(project: VideoProject, atMs: number): EditResult {
+  const videoResult = splitVideoClip(project, atMs);
+  let nextProject = videoResult.ok ? videoResult.project : project;
+  let changed = videoResult.ok && videoResult.changed;
+
+  const musicClip = findTrack(nextProject, 'music')?.clips.find(
+    (clip) => clip.startMs < atMs && atMs < clip.endMs,
+  );
+
+  if (musicClip) {
+    const musicResult = splitMusicClip(nextProject, musicClip.id, atMs);
+
+    if (musicResult.ok) {
+      nextProject = musicResult.project;
+      changed = changed || musicResult.changed;
+    }
+  }
+
+  // 一次都没切到：把视频的拒绝理由原样返回，界面提示保持具体。
+  if (!changed) {
+    return videoResult;
+  }
+
+  return commitEdit(project, nextProject);
+}
+
 function deleteMusicClip(project: VideoProject, clipId: string): EditResult {
   const track = findTrack(project, 'music');
 
@@ -1210,6 +1248,9 @@ export function applyEdit(project: VideoProject, action: EditAction): EditResult
 
     case 'split-video':
       return splitVideoClip(project, action.atMs);
+
+    case 'split-at-playhead':
+      return splitAtPlayhead(project, action.atMs);
 
     case 'delete-clip': {
       const clip = findClipById(project, action.clipId);

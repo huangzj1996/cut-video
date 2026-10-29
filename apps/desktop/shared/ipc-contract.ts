@@ -82,6 +82,16 @@ export interface MusicLibraryResult {
   status: 'ok' | 'unavailable';
 }
 
+/**
+ * 编辑器刚添加、尚未保存进 project.json 的音乐素材。
+ * 先登记到主进程，`asset://` 才能在自动保存前解析它；保存成功后主进程会清理登记。
+ */
+export interface MusicRegisterAssetInput {
+  assetId: string;
+  path: string;
+  projectId: string;
+}
+
 export interface ProjectSummary {
   contentRevision: number;
   createdAt: string;
@@ -283,6 +293,10 @@ export interface IpcInvokeContract {
     params: [];
     result: MusicLibraryResult;
   };
+  'music:register-asset': {
+    params: [input: MusicRegisterAssetInput];
+    result: null;
+  };
   'project:list': {
     params: [];
     result: ProjectSummary[];
@@ -374,6 +388,7 @@ export const IPC_CHANNELS = {
   },
   music: {
     listLibrary: 'music:list-library' satisfies IpcChannel,
+    registerAsset: 'music:register-asset' satisfies IpcChannel,
   },
   project: {
     create: 'project:create' satisfies IpcChannel,
@@ -429,6 +444,9 @@ export interface MiaomaMediaApi {
 
 export interface MiaomaMusicApi {
   listLibrary(): Promise<IpcResponse<IpcResult<'music:list-library'>>>;
+  registerAsset(
+    input: MusicRegisterAssetInput,
+  ): Promise<IpcResponse<IpcResult<'music:register-asset'>>>;
 }
 
 export interface MiaomaChatApi {

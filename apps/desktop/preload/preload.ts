@@ -43,6 +43,7 @@ const api: MiaomaApi = {
   },
   music: {
     listLibrary: () => invoke(IPC_CHANNELS.music.listLibrary),
+    registerAsset: (input) => invoke(IPC_CHANNELS.music.registerAsset, input),
   },
   project: {
     create: (input) => invoke(IPC_CHANNELS.project.create, input),

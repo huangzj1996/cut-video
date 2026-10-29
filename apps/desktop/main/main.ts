@@ -27,6 +27,7 @@ import {
   type IpcResult,
   type MediaInfo,
   type MusicLibraryResult,
+  type MusicRegisterAssetInput,
 } from '../shared/ipc-contract';
 import { ChatService } from './chat/chat-service';
 import { ChatStore } from './chat/chat-store';
@@ -37,6 +38,11 @@ import { planAudioSourceRead } from './media/audio-source';
 import { isBinaryAvailable } from './media/binary-check';
 import { resolveMediaBinary } from './media/ffmpeg-path';
 import { createMusicLibraryLoader, resolveMusicLibraryRoot } from './music/library';
+import {
+  createPendingMusicAssetRegistry,
+  normalizePendingMusicAsset,
+  withPendingMusicAssets,
+} from './music/pending-assets';
 import { ProjectStore } from './projects/project-store';
 import { loadSettings } from './settings';
 import { readPublicArtifact } from './workflow/artifact-reader';
@@ -159,6 +165,15 @@ function getProjectStore(): ProjectStore {
 }
 
 let musicLibraryLoader: ReturnType<typeof createMusicLibraryLoader> | null = null;
+const pendingMusicAssets = createPendingMusicAssetRegistry();
+
+function getMusicLibraryRoot(): string {
+  return resolveMusicLibraryRoot({
+    appPath: app.getAppPath(),
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  });
+}
 
 /**
  * 内置本地音乐库：读取应用资源目录并逐首探测时长。
@@ -177,11 +192,7 @@ function getMusicLibrary(): Promise<MusicLibraryResult> {
         return probeMusicDuration(media.ffprobePath, filePath);
       },
       readManifest: (filePath) => readFileSync(filePath, 'utf8'),
-      root: resolveMusicLibraryRoot({
-        appPath: app.getAppPath(),
-        isPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-      }),
+      root: getMusicLibraryRoot(),
       stat: (filePath) => {
         const stat = statSync(filePath);
 
@@ -301,6 +312,27 @@ function registerIpcHandlers(): void {
   // 内置本地音乐库：清单缺失/单曲损坏都落成结构化状态，不抛给渲染进程。
   handle(IPC_CHANNELS.music.listLibrary, () => getMusicLibrary());
 
+  // 刚添加、尚未保存进 project.json 的音乐素材：先登记路径，asset:// 才能解析。
+  handle(IPC_CHANNELS.music.registerAsset, (input) => {
+    const raw = input as Partial<MusicRegisterAssetInput> | undefined;
+    const projectId = assertProjectId(raw?.projectId);
+    const assetId = typeof raw?.assetId === 'string' ? raw.assetId : '';
+    const filePath = typeof raw?.path === 'string' ? raw.path : '';
+    const asset = normalizePendingMusicAsset({
+      assetId,
+      filePath,
+      projectId,
+      root: getMusicLibraryRoot(),
+    });
+
+    if (!asset) {
+      throw new IpcError('ASSET_INVALID_ARGUMENT', '音乐素材地址无效。');
+    }
+
+    pendingMusicAssets.register(projectId, asset);
+    return null;
+  });
+
   // 波形需要音频字节：按工程白名单读取配音/音乐，只把 base64 交给渲染进程解码。
   handle(IPC_CHANNELS.media.readAudio, (input) => {
     const raw = input as { assetId?: unknown; projectId?: unknown } | undefined;
@@ -338,7 +370,17 @@ function registerIpcHandlers(): void {
 
   handle(IPC_CHANNELS.project.list, () => getProjectStore().list());
   handle(IPC_CHANNELS.project.get, (projectId) => getProjectStore().get(projectId));
-  handle(IPC_CHANNELS.project.update, (input) => getProjectStore().update(input));
+  handle(IPC_CHANNELS.project.update, (input) => {
+    const saved = getProjectStore().update(input);
+
+    // 素材已经随工程落盘，asset:// 不再需要临时登记。
+    pendingMusicAssets.prune(
+      saved.project.projectId,
+      saved.assets.music.map((asset) => asset.id),
+    );
+
+    return saved;
+  });
   handle(IPC_CHANNELS.project.delete, (projectId) => getProjectStore().delete(projectId));
 
   // 渲染进程完成关闭前的保存后确认；主进程最多等 2 秒。
@@ -593,7 +635,9 @@ void app.whenReady().then(() => {
   loadDevelopmentEnv();
   Menu.setApplicationMenu(null);
   registerIpcHandlers();
-  registerAssetProtocol((projectId) => getProjectStore().get(projectId));
+  registerAssetProtocol((projectId) =>
+    withPendingMusicAssets(getProjectStore().get(projectId), pendingMusicAssets.list(projectId)),
+  );
   getWorkflowRunManager().recover();
   createWindow();
 

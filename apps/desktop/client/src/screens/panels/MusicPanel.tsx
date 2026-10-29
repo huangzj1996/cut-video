@@ -137,7 +137,7 @@ export function MusicPanel({
     };
   }, [onVolumePreview]);
 
-  const addTrack = (item: MusicLibraryTrack) => {
+  const addTrack = async (item: MusicLibraryTrack) => {
     if (!canWrite) {
       onNotice('编辑器只读，暂不能修改音乐。');
       return;
@@ -152,12 +152,33 @@ export function MusicPanel({
       return;
     }
 
+    const assetId = `music-${crypto.randomUUID()}`;
     const asset: MusicAsset = {
       durationMs: item.durationMs,
-      id: `music-${crypto.randomUUID()}`,
+      id: assetId,
       path: item.path,
       title: item.title,
     };
+    const musicApi = window.miaoma?.music;
+
+    // 新素材还没随工程保存：先让主进程知道 assetId → 路径，预览才能立即加载。
+    if (musicApi) {
+      try {
+        const response = await musicApi.registerAsset({
+          assetId,
+          path: item.path,
+          projectId: project.project.projectId,
+        });
+
+        if (!response.ok) {
+          onNotice('无法准备音乐预览，请稍后重试。');
+          return;
+        }
+      } catch {
+        onNotice('无法准备音乐预览，请稍后重试。');
+        return;
+      }
+    }
 
     onEdit({
       asset,
@@ -400,7 +421,9 @@ export function MusicPanel({
                     className={`ed-music-item${using ? ' is-selected' : ''}`}
                     disabled={disabled}
                     key={item.path}
-                    onClick={() => addTrack(item)}
+                    onClick={() => {
+                      void addTrack(item);
+                    }}
                     title={
                       !item.available
                         ? (item.unavailableReason ?? '该曲目不可用')

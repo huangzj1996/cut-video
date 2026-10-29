@@ -1,0 +1,15 @@
+{
+  "sort": "created_at_ascending",
+  "items": [
+    {
+      "order": 1,
+      "fileName": "example.m4a",
+      "title": "示例音乐",
+      "description": "平静｜适合社会题材｜偏慢｜02:01",
+      "mood": "平静",
+      "scenes": ["社会题材"],
+      "tempo": "偏慢",
+      "duration": "02:01"
+    }
+  ]
+}

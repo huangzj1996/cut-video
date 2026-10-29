@@ -59,6 +59,29 @@ export interface MediaReadAudioResult {
   mimeType: string;
 }
 
+/**
+ * 应用内置本地音乐库的曲目。不可用条目也会返回，让 UI 能逐条禁用并给出原因，
+ * 而不是整库失败；`durationMs` 不可用时为 null。
+ */
+export interface MusicLibraryTrack {
+  available: boolean;
+  description?: string;
+  durationMs: number | null;
+  fileName: string;
+  mood?: string;
+  path: string;
+  scenes: string[];
+  tempo?: string;
+  title: string;
+  unavailableReason?: string;
+}
+
+export interface MusicLibraryResult {
+  items: MusicLibraryTrack[];
+  message?: string;
+  status: 'ok' | 'unavailable';
+}
+
 export interface ProjectSummary {
   contentRevision: number;
   createdAt: string;
@@ -256,6 +279,10 @@ export interface IpcInvokeContract {
     params: [input: MediaReadAudioInput];
     result: MediaReadAudioResult;
   };
+  'music:list-library': {
+    params: [];
+    result: MusicLibraryResult;
+  };
   'project:list': {
     params: [];
     result: ProjectSummary[];
@@ -345,6 +372,9 @@ export const IPC_CHANNELS = {
     getInfo: 'media:get-info' satisfies IpcChannel,
     readAudio: 'media:read-audio' satisfies IpcChannel,
   },
+  music: {
+    listLibrary: 'music:list-library' satisfies IpcChannel,
+  },
   project: {
     create: 'project:create' satisfies IpcChannel,
     delete: 'project:delete' satisfies IpcChannel,
@@ -397,6 +427,10 @@ export interface MiaomaMediaApi {
   readAudio(input: MediaReadAudioInput): Promise<IpcResponse<IpcResult<'media:read-audio'>>>;
 }
 
+export interface MiaomaMusicApi {
+  listLibrary(): Promise<IpcResponse<IpcResult<'music:list-library'>>>;
+}
+
 export interface MiaomaChatApi {
   list(projectId: string): Promise<IpcResponse<IpcResult<'chat:list'>>>;
   start(projectId: string): Promise<IpcResponse<IpcResult<'chat:start'>>>;
@@ -428,6 +462,7 @@ export interface MiaomaApi {
   getSettings(): Promise<IpcResponse<IpcResult<'settings:get'>>>;
   getMediaInfo(): Promise<IpcResponse<IpcResult<'media:get-info'>>>;
   media: MiaomaMediaApi;
+  music: MiaomaMusicApi;
   project: MiaomaProjectApi;
   llm: MiaomaLlmApi;
   chat: MiaomaChatApi;

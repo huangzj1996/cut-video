@@ -9,6 +9,7 @@ import {
   type LlmMessage,
   type LlmProvider,
 } from '@miaoma/video-agent/llm';
+import { probeAudioDuration as probeMusicDuration } from '@miaoma/video-agent';
 import {
   ApprovalDecisionSchema,
   ArtifactReferenceSchema,
@@ -25,6 +26,7 @@ import {
   type IpcResponse,
   type IpcResult,
   type MediaInfo,
+  type MusicLibraryResult,
 } from '../shared/ipc-contract';
 import { ChatService } from './chat/chat-service';
 import { ChatStore } from './chat/chat-store';
@@ -34,6 +36,7 @@ import { registerAssetProtocol, registerAssetScheme } from './media/asset-protoc
 import { planAudioSourceRead } from './media/audio-source';
 import { isBinaryAvailable } from './media/binary-check';
 import { resolveMediaBinary } from './media/ffmpeg-path';
+import { createMusicLibraryLoader, resolveMusicLibraryRoot } from './music/library';
 import { ProjectStore } from './projects/project-store';
 import { loadSettings } from './settings';
 import { readPublicArtifact } from './workflow/artifact-reader';
@@ -155,6 +158,41 @@ function getProjectStore(): ProjectStore {
   }
 }
 
+let musicLibraryLoader: ReturnType<typeof createMusicLibraryLoader> | null = null;
+
+/**
+ * 内置本地音乐库：读取应用资源目录并逐首探测时长。
+ * 成功结果在进程内缓存；库不可用时不缓存，便于放入素材后重开面板恢复。
+ */
+function getMusicLibrary(): Promise<MusicLibraryResult> {
+  if (!musicLibraryLoader) {
+    const media = buildMediaInfo();
+
+    musicLibraryLoader = createMusicLibraryLoader({
+      probeDuration: (filePath) => {
+        if (!media.ffprobeExists) {
+          return { message: 'ffprobe 不可用，无法读取音频时长。', ok: false };
+        }
+
+        return probeMusicDuration(media.ffprobePath, filePath);
+      },
+      readManifest: (filePath) => readFileSync(filePath, 'utf8'),
+      root: resolveMusicLibraryRoot({
+        appPath: app.getAppPath(),
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+      }),
+      stat: (filePath) => {
+        const stat = statSync(filePath);
+
+        return { isFile: stat.isFile() };
+      },
+    });
+  }
+
+  return musicLibraryLoader.load();
+}
+
 let workflowRunManager: WorkflowRunManager | null = null;
 let chatService: ChatService | null = null;
 let activeCloseFlush: CloseFlushCoordinator | null = null;
@@ -259,6 +297,9 @@ function registerIpcHandlers(): void {
       throw new IpcError('MEDIA_INFO_FAILED', '媒体工具检测失败。', true);
     }
   });
+
+  // 内置本地音乐库：清单缺失/单曲损坏都落成结构化状态，不抛给渲染进程。
+  handle(IPC_CHANNELS.music.listLibrary, () => getMusicLibrary());
 
   // 波形需要音频字节：按工程白名单读取配音/音乐，只把 base64 交给渲染进程解码。
   handle(IPC_CHANNELS.media.readAudio, (input) => {

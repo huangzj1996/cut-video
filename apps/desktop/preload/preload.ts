@@ -41,6 +41,9 @@ const api: MiaomaApi = {
   media: {
     readAudio: (input) => invoke(IPC_CHANNELS.media.readAudio, input),
   },
+  music: {
+    listLibrary: () => invoke(IPC_CHANNELS.music.listLibrary),
+  },
   project: {
     create: (input) => invoke(IPC_CHANNELS.project.create, input),
     delete: (projectId) => invoke(IPC_CHANNELS.project.delete, projectId),

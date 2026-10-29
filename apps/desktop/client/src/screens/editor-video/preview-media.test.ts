@@ -516,6 +516,35 @@ describe('buildPreviewMediaPlan audio', () => {
     expect(buildPreviewMediaPlan(project, 1).music).toBeNull();
   });
 
+  it('omits the music plan when the music track is switched off', () => {
+    const project = makeProject();
+
+    project.tracks = project.tracks.map((track) =>
+      track.kind === 'music' ? { ...track, visible: false } : track,
+    );
+
+    const plan = buildPreviewMediaPlan(project, 1);
+
+    expect(plan.music).toBeNull();
+    expect(plan.voice).not.toBeNull();
+  });
+
+  it('carries the clip volume into the music plan', () => {
+    const project = makeProject();
+
+    project.tracks = project.tracks.map((track) =>
+      track.kind === 'music'
+        ? {
+            ...track,
+            visible: true,
+            clips: track.clips.map((clip) => ({ ...clip, volume: 0.35 })),
+          }
+        : track,
+    );
+
+    expect(buildPreviewMediaPlan(project, 1).music?.volume).toBe(0.35);
+  });
+
   it('stops non-looping audio at its trimmed source end', () => {
     const project = makeProject();
 

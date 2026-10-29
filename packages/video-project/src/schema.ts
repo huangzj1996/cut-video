@@ -262,6 +262,8 @@ export const MusicTrackSchema = z.object({
   clips: z.array(MusicClipSchema),
   id: IdSchema,
   kind: z.literal('music'),
+  // inferred：需求 §9.5 的开关。缺省视为开启，旧工程不需要迁移。
+  visible: z.boolean().optional(),
 });
 
 export const TimelineTrackSchema = z.discriminatedUnion('kind', [

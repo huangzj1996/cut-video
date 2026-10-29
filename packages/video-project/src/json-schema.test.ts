@@ -84,6 +84,24 @@ describe('JSON Schema exports', () => {
     expect(options).toHaveLength(4);
   });
 
+  it('exports the optional music track visibility', () => {
+    const schema = asObject(getJsonSchema(VideoProjectSchema));
+    const tracks = asObject(asObject(schema.properties).tracks);
+    const options = asObject(tracks.items).oneOf as JsonObject[];
+    const musicTrack = options.find(
+      (option) => asObject(asObject(option.properties).kind).const === 'music',
+    );
+
+    if (!musicTrack) {
+      throw new Error('missing music track schema');
+    }
+
+    const properties = asObject(musicTrack.properties);
+
+    expect(asObject(properties.visible).type).toBe('boolean');
+    expect((musicTrack.required as string[] | undefined) ?? []).not.toContain('visible');
+  });
+
   it('exports chat messages as an eleven-way oneOf', () => {
     const schema = asObject(getJsonSchema(JSON_SCHEMA_EXPORTS.chatMessage));
     const options = schema.oneOf as JsonObject[];

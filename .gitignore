@@ -26,3 +26,9 @@ apps/desktop/resources/ffmpeg/*.dll
 apps/desktop/resources/ffmpeg/*.so
 apps/desktop/resources/ffmpeg/*.dylib
 apps/desktop/resources/ffmpeg/*.zip
+
+# 内置音乐库的音频与清单不提交（体积与版权）；目录说明与示例清单保留。
+apps/desktop/resources/assets/song/*.m4a
+apps/desktop/resources/assets/song/*.mp3
+apps/desktop/resources/assets/song/*.wav
+apps/desktop/resources/assets/song/song.json

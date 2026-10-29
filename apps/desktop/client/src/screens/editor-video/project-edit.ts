@@ -1,4 +1,5 @@
 import type {
+  MusicAsset,
   MusicClip,
   Scene,
   SubtitleClip,
@@ -19,6 +20,9 @@ import type {
 
 /** 字幕/音乐片段允许的最短时长：再短就无法在时间线上稳定点选或裁剪。 */
 export const MIN_CLIP_DURATION_MS = 100;
+
+/** 新添加音乐时的默认音量；之后由面板音量滑杆覆盖。 */
+export const DEFAULT_MUSIC_VOLUME = 0.6;
 
 export type ClipEdge = 'start' | 'end';
 
@@ -91,7 +95,24 @@ export type EditAction =
       clipId: string;
       atMs: number;
     }
-  | { type: 'delete-music-clip'; clipId: string };
+  | { type: 'delete-music-clip'; clipId: string }
+  | {
+      /** 添加/更换背景音乐：登记素材并从时间线 0 开始放一条片段，替换已有音乐。 */
+      type: 'add-music';
+      asset: MusicAsset;
+      volume?: number;
+    }
+  | { type: 'remove-music' }
+  | {
+      /** 音乐轨的“可听”开关；只改可见性，不删除片段、音量或裁剪。 */
+      type: 'set-music-visible';
+      visible: boolean;
+    }
+  | {
+      /** 把整条音乐轨的音量设置成同一值（0–1）。 */
+      type: 'set-music-volume';
+      volume: number;
+    };
 
 export type EditRejectionCode =
   | 'EDIT_ASSET_REPLACE_BLOCKED'
@@ -106,6 +127,9 @@ export type EditRejectionCode =
   | 'EDIT_SCENE_ADD_BLOCKED'
   | 'EDIT_SCENE_NOT_FOUND'
   | 'EDIT_SCENE_REMOVE_BLOCKED'
+  | 'EDIT_MUSIC_ASSET_INVALID'
+  | 'EDIT_MUSIC_EMPTY_PROJECT'
+  | 'EDIT_MUSIC_VOLUME_INVALID'
   | 'EDIT_SOURCE_ASSET_MISSING'
   | 'EDIT_SOURCE_RANGE_EXCEEDED'
   | 'EDIT_SPLIT_OUTSIDE_CLIP'
@@ -1155,6 +1179,140 @@ function deleteMusicClip(project: VideoProject, clipId: string): EditResult {
   });
 }
 
+function isValidMusicVolume(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/** 用新的片段替换音乐轨；工程缺少音乐轨时补一条，并让新添加的音乐重新可听。 */
+function musicTrackWithClips(project: VideoProject, clips: MusicClip[]): VideoProject['tracks'] {
+  if (findTrack(project, 'music')) {
+    return project.tracks.map((track): VideoProject['tracks'][number] =>
+      track.kind === 'music' ? { ...track, clips, visible: true } : track,
+    );
+  }
+
+  return [...project.tracks, { clips, id: 'track-music', kind: 'music' }];
+}
+
+/**
+ * 添加/更换背景音乐：一条从 0 开始、长度取“素材时长与工程总时长较小者”的片段，
+ * 不循环铺满。已有音乐时同一次编辑内替换，旧素材登记一并清理。
+ */
+function addMusicClip(
+  project: VideoProject,
+  asset: MusicAsset,
+  requestedVolume: number | undefined,
+): EditResult {
+  const totalMs = sceneTotalMs(orderedScenes(project));
+
+  if (totalMs <= 0) {
+    return reject('EDIT_MUSIC_EMPTY_PROJECT', '工程还没有时长，无法添加背景音乐。');
+  }
+
+  if (!asset.id || !asset.path || !Number.isSafeInteger(asset.durationMs)) {
+    return reject('EDIT_MUSIC_ASSET_INVALID', '音乐素材信息不完整。');
+  }
+
+  if (asset.durationMs < MIN_CLIP_DURATION_MS) {
+    return reject('EDIT_MUSIC_ASSET_INVALID', `音乐素材至少需要 ${MIN_CLIP_DURATION_MS}ms。`);
+  }
+
+  if (project.assets.music.some((candidate) => candidate.id === asset.id)) {
+    return reject('EDIT_MUSIC_ASSET_INVALID', '音乐素材 ID 与工程中已有素材重复。');
+  }
+
+  const clipDurationMs = Math.min(asset.durationMs, totalMs);
+
+  if (clipDurationMs < MIN_CLIP_DURATION_MS) {
+    return reject('EDIT_INVALID_CLIP_RANGE', `音乐片段至少需要 ${MIN_CLIP_DURATION_MS}ms。`);
+  }
+
+  const existingVolume = findTrack(project, 'music')?.clips[0]?.volume;
+  const volume = requestedVolume ?? existingVolume ?? DEFAULT_MUSIC_VOLUME;
+
+  if (!isValidMusicVolume(volume)) {
+    return reject('EDIT_MUSIC_VOLUME_INVALID', '音乐音量必须在 0 到 1 之间。');
+  }
+
+  const clip: MusicClip = {
+    assetId: asset.id,
+    endMs: clipDurationMs,
+    id: uniqueClipId(project, `clip-music-${asset.id}`),
+    kind: 'music',
+    loop: false,
+    sourceEndMs: clipDurationMs,
+    sourceStartMs: 0,
+    startMs: 0,
+    volume,
+  };
+
+  return commitEdit(project, {
+    ...project,
+    assets: { ...project.assets, music: [asset] },
+    tracks: musicTrackWithClips(project, [clip]),
+  });
+}
+
+function removeMusic(project: VideoProject): EditResult {
+  const track = findTrack(project, 'music');
+  const hasClips = (track?.clips.length ?? 0) > 0;
+
+  if (!hasClips && project.assets.music.length === 0) {
+    return { changed: false, ok: true, project };
+  }
+
+  return commitEdit(project, {
+    ...project,
+    assets: { ...project.assets, music: [] },
+    tracks: track
+      ? project.tracks.map((candidate): VideoProject['tracks'][number] =>
+          candidate.kind === 'music' ? { ...candidate, clips: [] } : candidate,
+        )
+      : project.tracks,
+  });
+}
+
+function setMusicVisible(project: VideoProject, visible: boolean): EditResult {
+  const track = findTrack(project, 'music');
+
+  if (!track || track.clips.length === 0) {
+    return reject('EDIT_CLIP_NOT_FOUND', '当前没有可开关的背景音乐。');
+  }
+
+  if ((track.visible ?? true) === visible) {
+    return { changed: false, ok: true, project };
+  }
+
+  return commitEdit(project, {
+    ...project,
+    tracks: replaceTracks(project, { ...track, visible }),
+  });
+}
+
+function setMusicVolume(project: VideoProject, volume: number): EditResult {
+  if (!isValidMusicVolume(volume)) {
+    return reject('EDIT_MUSIC_VOLUME_INVALID', '音乐音量必须在 0 到 1 之间。');
+  }
+
+  const track = findTrack(project, 'music');
+
+  if (!track || track.clips.length === 0) {
+    return reject('EDIT_CLIP_NOT_FOUND', '当前没有可调整音量的背景音乐。');
+  }
+
+  if (track.clips.every((clip) => (clip.volume ?? 1) === volume)) {
+    return { changed: false, ok: true, project };
+  }
+
+  return commitEdit(project, {
+    ...project,
+    tracks: replaceTracks(project, {
+      ...track,
+      clips: track.clips.map((clip) => ({ ...clip, volume })),
+    }),
+  });
+}
+
 function reorderScene(
   project: VideoProject,
   action: Extract<EditAction, { type: 'reorder-scene' }>,
@@ -1264,5 +1422,17 @@ export function applyEdit(project: VideoProject, action: EditAction): EditResult
 
     case 'delete-music-clip':
       return deleteMusicClip(project, action.clipId);
+
+    case 'add-music':
+      return addMusicClip(project, action.asset, action.volume);
+
+    case 'remove-music':
+      return removeMusic(project);
+
+    case 'set-music-visible':
+      return setMusicVisible(project, action.visible);
+
+    case 'set-music-volume':
+      return setMusicVolume(project, action.volume);
   }
 }

@@ -10,7 +10,8 @@ const config: ForgeConfig = {
     asar: true,
     executableName: 'miaoma-magicut',
     // FFmpeg/ffprobe 不提交仓库；打包前放入 resources/ffmpeg。
-    extraResource: ['./resources/ffmpeg'],
+    // 内置本地音乐库同理：音频与清单不入库，打包时一起带入 resources/assets。
+    extraResource: ['./resources/ffmpeg', './resources/assets'],
   },
   rebuildConfig: {},
   makers: [

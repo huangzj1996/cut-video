@@ -195,6 +195,27 @@ describe('VideoProjectSchema', () => {
     expect(VideoProjectSchema.parse(input)).toEqual(input);
   });
 
+  it('treats music track visibility as optional and defaults to enabled', () => {
+    const omitted = VideoProjectSchema.parse(createValidProjectInput());
+    const hiddenInput = createValidProjectInput();
+    const hidden = VideoProjectSchema.parse({
+      ...hiddenInput,
+      tracks: hiddenInput.tracks.map((track) =>
+        track.kind === 'music' ? { ...track, visible: false } : track,
+      ),
+    });
+    const omittedMusic = omitted.tracks.find((track) => track.kind === 'music');
+    const hiddenMusic = hidden.tracks.find((track) => track.kind === 'music');
+
+    expect(omittedMusic?.kind).toBe('music');
+    expect(hiddenMusic?.kind).toBe('music');
+
+    if (omittedMusic?.kind === 'music' && hiddenMusic?.kind === 'music') {
+      expect(omittedMusic.visible).toBeUndefined();
+      expect(hiddenMusic.visible).toBe(false);
+    }
+  });
+
   it('rejects an unknown schema version', () => {
     const input = { ...createValidProjectInput(), schemaVersion: '2.0.0' };
     const result = VideoProjectSchema.safeParse(input);

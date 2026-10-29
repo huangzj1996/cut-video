@@ -51,6 +51,10 @@ describe('IPC channel contract', () => {
     ]);
   });
 
+  it('registers the music library channel', () => {
+    expect(Object.values(IPC_CHANNELS.music)).toEqual(['music:list-library']);
+  });
+
   it('registers unique push event channels that do not collide with invoke channels', () => {
     expect(eventChannels.sort()).toEqual([
       'chat:message',

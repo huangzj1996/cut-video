@@ -321,7 +321,10 @@ export function buildPreviewMediaPlan(
 ): PreviewMediaPlan {
   const videoClips = sortedByStart(findTrack(project, 'video')?.clips ?? []);
   const voiceClips = sortedByStart(findTrack(project, 'voice')?.clips ?? []);
-  const musicClips = sortedByStart(findTrack(project, 'music')?.clips ?? []);
+  const musicTrack = findTrack(project, 'music');
+  const musicClips = sortedByStart(musicTrack?.clips ?? []);
+  // 音乐轨关闭时是“可听性”关闭：不产出音频计划，但片段与波形保持不变。
+  const musicAudible = musicTrack?.visible ?? true;
   const videosById = new Map(project.assets.videos.map((asset) => [asset.id, asset]));
   const voicesById = new Map(project.assets.voices.map((asset) => [asset.id, asset]));
   const musicById = new Map(project.assets.music.map((asset) => [asset.id, asset]));
@@ -367,7 +370,7 @@ export function buildPreviewMediaPlan(
     }
   }
 
-  const activeMusic = findClipAtSeconds(musicClips, timelineSeconds);
+  const activeMusic = musicAudible ? findClipAtSeconds(musicClips, timelineSeconds) : undefined;
   let music: PreviewAudioPlan | null = null;
 
   if (activeMusic) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type {
+  MusicAsset,
   MusicClip,
   SubtitleClip,
   VideoClip,
@@ -8,6 +9,7 @@ import type {
 } from '@miaoma/video-project';
 import {
   applyEdit,
+  DEFAULT_MUSIC_VOLUME,
   findInvariantViolations,
   MIN_CLIP_DURATION_MS,
   type EditAction,
@@ -1098,6 +1100,157 @@ describe('applyEdit blocked structural edits', () => {
     expectRejected(
       edit(project, { clipId: 'clip-missing', type: 'delete-clip' }),
       'EDIT_CLIP_NOT_FOUND',
+    );
+  });
+});
+
+describe('applyEdit music library', () => {
+  function musicAsset(overrides: Partial<MusicAsset> = {}): MusicAsset {
+    return {
+      durationMs: 30_000,
+      id: 'music-new',
+      path: 'D:/music/song.m4a',
+      title: '新音乐',
+      ...overrides,
+    };
+  }
+
+  function musicTrack(project: VideoProject) {
+    return project.tracks.find((track) => track.kind === 'music');
+  }
+
+  it('adds music from the beginning and clamps it to the project duration', () => {
+    const project = createEditingProject();
+    const result = expectOk(edit(project, { asset: musicAsset(), type: 'add-music', volume: 0.6 }));
+    const clips = musicTrackClips(result.project);
+
+    expect(clips).toHaveLength(1);
+    expect(clips[0]).toMatchObject({
+      assetId: 'music-new',
+      endMs: 12_000,
+      loop: false,
+      sourceEndMs: 12_000,
+      sourceStartMs: 0,
+      startMs: 0,
+      volume: 0.6,
+    });
+    expect(result.project.assets.music).toEqual([musicAsset()]);
+    expect(totalSceneMs(result.project)).toBe(totalSceneMs(project));
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('keeps a shorter song at its own length and leaves the rest of the timeline empty', () => {
+    const result = expectOk(
+      edit(createEditingProject(), {
+        asset: musicAsset({ durationMs: 5_000 }),
+        type: 'add-music',
+      }),
+    );
+    const clips = musicTrackClips(result.project);
+
+    expect(clips[0]).toMatchObject({ endMs: 5_000, sourceEndMs: 5_000, startMs: 0 });
+    expect(clips[0]?.volume).toBe(DEFAULT_MUSIC_VOLUME);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('replaces the current music and its asset in a single edit', () => {
+    const result = expectOk(
+      edit(createEditingProject(), { asset: musicAsset(), type: 'add-music' }),
+    );
+
+    expect(result.project.assets.music.map((asset) => asset.id)).toEqual(['music-new']);
+    expect(musicTrackClips(result.project)).toHaveLength(1);
+    expect(musicTrackClips(result.project)[0]?.assetId).toBe('music-new');
+  });
+
+  it('rejects an empty project, invalid asset, duplicate id and invalid volume', () => {
+    expectRejected(
+      edit({ ...createEditingProject(), scenes: [] }, { asset: musicAsset(), type: 'add-music' }),
+      'EDIT_MUSIC_EMPTY_PROJECT',
+    );
+    expectRejected(
+      edit(createEditingProject(), {
+        asset: musicAsset({ durationMs: 0 }),
+        type: 'add-music',
+      }),
+      'EDIT_MUSIC_ASSET_INVALID',
+    );
+    expectRejected(
+      edit(createEditingProject(), {
+        asset: musicAsset({ id: 'music-1' }),
+        type: 'add-music',
+      }),
+      'EDIT_MUSIC_ASSET_INVALID',
+    );
+    expectRejected(
+      edit(createEditingProject(), {
+        asset: musicAsset(),
+        type: 'add-music',
+        volume: 1.5,
+      }),
+      'EDIT_MUSIC_VOLUME_INVALID',
+    );
+  });
+
+  it('removes music clips and music assets without touching other tracks', () => {
+    const project = createEditingProject();
+    const result = expectOk(edit(project, { type: 'remove-music' }));
+
+    expect(musicTrackClips(result.project)).toEqual([]);
+    expect(result.project.assets.music).toEqual([]);
+    expect(result.project.tracks.filter((track) => track.kind !== 'music')).toEqual(
+      project.tracks.filter((track) => track.kind !== 'music'),
+    );
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('toggles music audibility without dropping clips or volume', () => {
+    const project = createEditingProject();
+    const hidden = expectOk(edit(project, { type: 'set-music-visible', visible: false }));
+
+    expect(musicTrack(hidden.project)?.visible).toBe(false);
+    expect(musicTrackClips(hidden.project)).toEqual(musicTrackClips(project));
+
+    const shown = expectOk(edit(hidden.project, { type: 'set-music-visible', visible: true }));
+
+    expect(musicTrack(shown.project)?.visible).toBe(true);
+    expect(musicTrack(shown.project)?.clips).toEqual(musicTrackClips(project));
+  });
+
+  it('turns the music switch back on when adding while it was off', () => {
+    const hidden = expectOk(
+      edit(createEditingProject(), { type: 'set-music-visible', visible: false }),
+    );
+    const result = expectOk(edit(hidden.project, { asset: musicAsset(), type: 'add-music' }));
+
+    expect(musicTrack(result.project)?.visible).toBe(true);
+  });
+
+  it('sets the same volume on every music clip', () => {
+    const split = expectOk(
+      edit(createEditingProject(), {
+        atMs: 6_000,
+        clipId: 'clip-music-1',
+        type: 'split-music-clip',
+      }),
+    );
+    const result = expectOk(edit(split.project, { type: 'set-music-volume', volume: 0.3 }));
+
+    expect(musicTrackClips(result.project).map((clip) => clip.volume)).toEqual([0.3, 0.3]);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('rejects music operations when the track has no clips', () => {
+    const project = withMusicClips(createEditingProject(), []);
+
+    expectRejected(
+      edit(project, { type: 'set-music-visible', visible: false }),
+      'EDIT_CLIP_NOT_FOUND',
+    );
+    expectRejected(edit(project, { type: 'set-music-volume', volume: 0.5 }), 'EDIT_CLIP_NOT_FOUND');
+    expectRejected(
+      edit(project, { type: 'set-music-volume', volume: 2 }),
+      'EDIT_MUSIC_VOLUME_INVALID',
     );
   });
 });

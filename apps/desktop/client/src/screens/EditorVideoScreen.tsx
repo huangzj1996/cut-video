@@ -287,6 +287,7 @@ function EditorWorkspace({
   );
   const [activeRail, setActiveRail] = useState<EditorRailId>('video');
   const [muted, setMuted] = useState(false);
+  const [musicVolumePreview, setMusicVolumePreview] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [timecodeEditing, setTimecodeEditing] = useState(false);
   const [timecodeDraft, setTimecodeDraft] = useState('');
@@ -340,10 +341,14 @@ function EditorWorkspace({
   const selectedName = selectedScene?.title ?? '未选择分镜';
   const selectedRange = selectedScene?.rangeLabel ?? '—';
   const playheadRatio = Math.min(1, Math.max(0, currentTime / spanSeconds));
-  const previewPlan = useMemo(
-    () => buildPreviewMediaPlan(session.project, currentTime),
-    [currentTime, session.project],
-  );
+  const previewPlan = useMemo(() => {
+    const plan = buildPreviewMediaPlan(session.project, currentTime);
+
+    // 拖动音量滑杆时只覆盖试听音量，松手才写工程（一次撤销步）。
+    return musicVolumePreview !== null && plan.music
+      ? { ...plan, music: { ...plan.music, volume: musicVolumePreview } }
+      : plan;
+  }, [currentTime, musicVolumePreview, session.project]);
   const subtitleOverlay = useMemo(
     () => resolveSubtitleOverlay(session.project, currentTime),
     [currentTime, session.project],
@@ -640,6 +645,11 @@ function EditorWorkspace({
     },
     [pause],
   );
+
+  // 音量提交不暂停：面板需要边播边听，松手后只落一次可撤销编辑。
+  const commitMusicVolume = useCallback((volume: number) => {
+    sessionDispatch({ action: { type: 'set-music-volume', volume }, type: 'edit' });
+  }, []);
 
   const seekFromClientX = useCallback(
     (clientX: number, offsetSeconds: number) => {
@@ -1765,7 +1775,14 @@ function EditorWorkspace({
           ) : activeRail === 'subtitle' ? (
             <SubtitlePanel />
           ) : (
-            <MusicPanel />
+            <MusicPanel
+              onEdit={performEdit}
+              onNotice={notify}
+              onVolumeCommit={commitMusicVolume}
+              onVolumePreview={setMusicVolumePreview}
+              project={session.project}
+              readonly={session.readonly || session.saveStatus === 'conflict'}
+            />
           )}
         </aside>
 

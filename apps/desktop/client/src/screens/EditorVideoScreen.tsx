@@ -1211,6 +1211,19 @@ function EditorWorkspace({
     });
   }, [currentTime, notify, pause, performEdit, selection.clip, session.readonly]);
 
+  /**
+   * 工具栏只保留一个分割按钮：选中音乐片段时分割音乐，否则在播放头处分割视频。
+   * （此前并排放了两个一模一样的剪刀图标，容易误点。）
+   */
+  const splitAtPlayheadOrSelection = (): void => {
+    if (selection.clip?.kind === 'music') {
+      splitSelectedMusic();
+      return;
+    }
+
+    splitAtPlayhead();
+  };
+
   const canEditSelectedClip =
     !session.readonly && (selection.clip?.kind === 'subtitle' || selection.clip?.kind === 'music');
 
@@ -1817,21 +1830,10 @@ function EditorWorkspace({
             <button
               className="ed-icon-button"
               type="button"
-              aria-label="分割"
-              title="在播放头处分割视频片段"
+              aria-label="在播放头处分割"
+              title="在播放头处分割（选中音乐片段时分割音乐，否则分割视频）"
               disabled={session.readonly}
-              onClick={splitAtPlayhead}
-            >
-              <EditorIcon name="split" size={15} />
-            </button>
-
-            <button
-              className="ed-icon-button"
-              type="button"
-              aria-label="在播放头处分割音乐"
-              title="在播放头处分割选中的音乐片段"
-              disabled={session.readonly}
-              onClick={splitSelectedMusic}
+              onClick={splitAtPlayheadOrSelection}
             >
               <EditorIcon name="split" size={15} />
             </button>

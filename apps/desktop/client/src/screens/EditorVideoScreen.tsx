@@ -104,13 +104,13 @@ interface TimelineTool {
   /** 尚无对应行为的开关：禁用并提示后续版本提供，避免只切本地状态。 */
   future?: boolean;
   icon: EditorIconName;
-  id: 'link' | 'snap' | 'wave';
+  id: 'assist' | 'wave';
   label: string;
 }
 
 const TIMELINE_TOOLS: readonly TimelineTool[] = [
-  { future: true, icon: 'magnet', id: 'snap', label: '吸附' },
-  { future: true, icon: 'link', id: 'link', label: '联动' },
+  // 吸附与联动都还没有实现，合并成一个占位按钮，避免工具栏出现两个死按钮。
+  { future: true, icon: 'magnet', id: 'assist', label: '吸附与联动' },
   { icon: 'wave', id: 'wave', label: '波形' },
 ];
 

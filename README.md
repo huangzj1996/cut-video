@@ -57,7 +57,6 @@ pnpm make             # 生成 Windows 安装包
 - `#/create-chat` 创作消息页
 - `#/editor` 四轨编辑器
 - `#/llm-test` LLM 基础对话测试台
-- `#/status` 脚手架状态页（含测试台入口）
 
 ## 项目文件与 IPC
 

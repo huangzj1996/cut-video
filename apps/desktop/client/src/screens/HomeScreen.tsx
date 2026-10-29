@@ -36,7 +36,7 @@ export function HomeScreen({ activeTab }: { activeTab: HomeTab }) {
           className="cr-brand"
           type="button"
           onClick={() => {
-            window.location.hash = '#/status';
+            window.location.hash = '#/create';
           }}
         >
           <img alt="" className="cr-brand-mark" src={brandMarkUrl} />

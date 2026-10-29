@@ -1465,9 +1465,9 @@ function EditorWorkspace({
         <button
           className="ed-brand"
           type="button"
-          title="返回工程状态"
+          title="返回创作页"
           onClick={() => {
-            window.location.hash = '#/status';
+            window.location.hash = '#/create';
           }}
         >
           <span className="ed-brand-mark" aria-hidden="true">

@@ -87,8 +87,8 @@ export function LlmTestScreen() {
           <button className="button button-ghost" type="button" onClick={clear} disabled={pending}>
             清空
           </button>
-          <a className="button button-ghost" href="#/status">
-            返回状态页
+          <a className="button button-ghost" href="#/create">
+            返回创作页
           </a>
         </div>
       </header>

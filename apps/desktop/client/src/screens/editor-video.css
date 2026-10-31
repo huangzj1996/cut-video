@@ -1900,6 +1900,23 @@
   color: var(--ed-text);
 }
 
+/* 导出进行中：浮层停在右下角，不遮挡预览，编辑仍由会话锁定。 */
+.ed-export-floating-layer {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 80;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.ed-export-floating-layer .ed-export-dialog {
+  pointer-events: auto;
+  width: min(400px, calc(100vw - 56px));
+  max-height: calc(100vh - 120px);
+}
+
 .ed-export-title {
   margin: 0;
   font-size: 20px;

@@ -26,6 +26,11 @@ import { resolveExportSaveGate } from './editor-video/export-save';
 import { EditorEmpty, EditorLoading, EditorUnavailable } from './editor-video/EditorStates';
 import { ExportDialog } from './editor-video/ExportDialog';
 import {
+  EXPORT_ENTRY_COPY,
+  EXPORT_LOCK_SAVE_DENIED,
+  resolveEditorLock,
+} from './editor-video/export-lock';
+import {
   loadEditorProject,
   buildEditorProjectView,
   type EditorLoadResult,
@@ -300,6 +305,13 @@ function EditorWorkspace({
   const [waveformsVisible, setWaveformsVisible] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  // 导出任务运行期间锁定编辑与导航，但预览播放与静音/全屏等查看操作保持可用。
+  const [exportLocked, setExportLocked] = useState(false);
+  const lock = resolveEditorLock({ exportLocked, readonly, readonlyMessage });
+  const editingLocked = lock.editingLocked;
+  const exportLockedRef = useRef(exportLocked);
+
+  exportLockedRef.current = exportLocked;
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [draggingSceneId, setDraggingSceneId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -430,10 +442,10 @@ function EditorWorkspace({
     };
   }, []);
 
-  // 工作流状态变化时同步只读标记；会话 reducer 负责拒绝只读期间的操作。
+  // 工作流只读或导出进行中时同步只读标记；会话 reducer 负责拒绝锁定期间的操作。
   useEffect(() => {
-    sessionDispatch({ readonly, type: 'readonly-changed' });
-  }, [readonly]);
+    sessionDispatch({ readonly: editingLocked, type: 'readonly-changed' });
+  }, [editingLocked]);
 
   // 缩短分镜会让项目总时长变小；播放头不能停在时间线之外。
   useEffect(() => {
@@ -502,14 +514,14 @@ function EditorWorkspace({
     };
   }, [persistProject]);
 
-  // 只读期间停掉自动保存；解锁后若仍有未保存的编辑，重新排一次保存。
-  const wasReadonlyRef = useRef(readonly);
+  // 锁定（工作流只读或导出进行中）期间停掉自动保存；解锁后若仍有未保存的编辑，重新排一次保存。
+  const wasReadonlyRef = useRef(editingLocked);
 
   useEffect(() => {
     const wasReadonly = wasReadonlyRef.current;
-    wasReadonlyRef.current = readonly;
+    wasReadonlyRef.current = editingLocked;
 
-    if (readonly) {
+    if (editingLocked) {
       autosaveRef.current?.stop();
       return;
     }
@@ -521,7 +533,7 @@ function EditorWorkspace({
         autosaveRef.current?.noteEdit();
       }
     }
-  }, [readonly]);
+  }, [editingLocked]);
 
   // 每次成功编辑（含撤销/重做）后重置 2s 防抖窗口。
   useEffect(() => {
@@ -598,7 +610,9 @@ function EditorWorkspace({
           notify(
             current.saveStatus === 'conflict'
               ? '保存冲突，请先重新加载工程。'
-              : '编辑器只读，暂不能保存。',
+              : exportLockedRef.current
+                ? EXPORT_LOCK_SAVE_DENIED
+                : '编辑器只读，暂不能保存。',
           );
           return;
         }
@@ -1513,7 +1527,12 @@ function EditorWorkspace({
         <button
           className="ed-brand"
           type="button"
-          title="返回创作页"
+          disabled={lock.navigationLocked}
+          title={
+            lock.navigationLocked
+              ? EXPORT_ENTRY_COPY.navLockedTitle
+              : EXPORT_ENTRY_COPY.navBackTitle
+          }
           onClick={() => {
             window.location.hash = '#/create';
           }}
@@ -1553,13 +1572,15 @@ function EditorWorkspace({
           <button
             className="ed-export"
             type="button"
-            disabled={session.readonly || exportOpen}
+            disabled={editingLocked || exportOpen}
             title={
-              session.readonly
-                ? '编辑器只读，暂不能导出'
-                : exportOpen
-                  ? '导出进行中'
-                  : '渲染并导出为 MP4'
+              exportLocked
+                ? EXPORT_ENTRY_COPY.runningTitle
+                : session.readonly
+                  ? EXPORT_ENTRY_COPY.lockedTitle
+                  : exportOpen
+                    ? EXPORT_ENTRY_COPY.openTitle
+                    : EXPORT_ENTRY_COPY.entryTitle
             }
             onClick={() => setExportOpen(true)}
           >
@@ -1569,10 +1590,10 @@ function EditorWorkspace({
         </div>
       </header>
 
-      {session.readonly ? (
+      {lock.banner ? (
         <div className="ed-readonly-banner" role="status">
           <EditorIcon name="lock" size={14} />
-          {readonlyMessage ?? 'AI 工作流正在运行或等待审批，编辑器暂时只读。'}
+          {lock.banner}
         </div>
       ) : null}
 
@@ -2030,7 +2051,9 @@ function EditorWorkspace({
       <ExportDialog
         beforeStart={saveBeforeExport}
         onClose={() => setExportOpen(false)}
+        onLockChange={setExportLocked}
         open={exportOpen}
+        project={session.project}
         projectId={view.projectId}
       />
 

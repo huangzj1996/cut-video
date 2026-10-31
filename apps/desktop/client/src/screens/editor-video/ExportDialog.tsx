@@ -1,8 +1,12 @@
 import { useEffect, useReducer, useState } from 'react';
-import { EXPORT_OUTPUT_SPEC, type ExportIssue } from '../../../../shared/ipc-contract';
+import type { VideoProject } from '@miaoma/video-project';
+import { type ExportIssue } from '../../../../shared/ipc-contract';
 import {
   createExportDialogState,
+  describeExportOutput,
+  EXPORT_DIALOG_COPY,
   exportDialogReducer,
+  exportDialogTitle,
   exportIssueText,
   exportPhaseLabel,
   isExportDialogLocked,
@@ -20,36 +24,13 @@ interface ExportDialogProps {
   /** 开始导出前自动保存，返回保存后的内容修订号；失败时抛出。 */
   beforeStart: () => Promise<number>;
   onClose: () => void;
+  /** 导出任务锁定编辑器（编辑禁用、预览仍可播放）时通知外层。 */
+  onLockChange: (locked: boolean) => void;
   open: boolean;
+  /** 当前工程：参数区据此展示输出规格与字幕/源声状态。 */
+  project: Pick<VideoProject, 'render' | 'tracks'>;
   projectId: string;
 }
-
-// 输出规格与计划编译器共用同一份常量，避免弹窗与成片参数不一致。
-const OUTPUT_SPECS = [
-  { label: '容器', value: EXPORT_OUTPUT_SPEC.container.toUpperCase() },
-  {
-    label: '画面',
-    value:
-      EXPORT_OUTPUT_SPEC.width +
-      '×' +
-      EXPORT_OUTPUT_SPEC.height +
-      ' · ' +
-      EXPORT_OUTPUT_SPEC.fps +
-      'fps',
-  },
-  {
-    label: '视频编码',
-    value: EXPORT_OUTPUT_SPEC.videoCodec === 'h264' ? 'H.264' : EXPORT_OUTPUT_SPEC.videoCodec,
-  },
-  {
-    label: '音轨',
-    value:
-      EXPORT_OUTPUT_SPEC.audioCodec.toUpperCase() +
-      ' ' +
-      EXPORT_OUTPUT_SPEC.audioBitrateKbps +
-      'kbps · 源声静音',
-  },
-] as const;
 
 function issuesFromDetails(details: unknown): ExportIssue[] | undefined {
   if (details === null || typeof details !== 'object') {
@@ -70,8 +51,15 @@ function clampPercent(percent: number | null): number | null {
   return percent === null || !Number.isFinite(percent) ? null : Math.min(100, Math.max(0, percent));
 }
 
-/** 导出弹窗：准备 → 渲染 → 完成/失败。渲染期间取消需要二次确认。 */
-export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDialogProps) {
+/** 导出弹窗：准备 → 校验/混音/渲染/自检 → 完成/失败；渲染期间取消需要二次确认。 */
+export function ExportDialog({
+  beforeStart,
+  onClose,
+  onLockChange,
+  open,
+  project,
+  projectId,
+}: ExportDialogProps) {
   const [state, dispatch] = useReducer(exportDialogReducer, undefined, () =>
     createExportDialogState(projectId),
   );
@@ -79,6 +67,11 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [loadingTarget, setLoadingTarget] = useState(false);
   const locked = isExportDialogLocked(state);
+
+  // 外层据此锁定编辑与导航。关闭弹窗会重置为准备态，locked 随之回到 false。
+  useEffect(() => {
+    onLockChange(locked);
+  }, [locked, onLockChange]);
 
   // 渲染中点关闭按钮/Esc/遮罩都先走取消二次确认，而不是直接关窗。
   const requestCancel = (): void => {
@@ -98,7 +91,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
     setCancelError(null);
 
     if (!api) {
-      setTargetError('Preload 桥接未加载，无法导出。');
+      setTargetError(EXPORT_DIALOG_COPY.error.bridgeMissing);
       return;
     }
 
@@ -156,9 +149,12 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
         return;
       }
 
-      // 渲染中按 Esc 不能直接关闭窗口，先进入取消确认。
+      // 导出进行中是右下角浮层（预览仍可操作）：Esc 只收起取消确认，不关闭也不发起取消。
       if (state.step === 'running') {
-        requestCancel();
+        if (state.cancelStep !== 'idle') {
+          dispatch({ type: 'cancel-dismissed' });
+        }
+
         return;
       }
 
@@ -172,7 +168,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [locked, onClose, open, state.step]);
+  }, [locked, onClose, open, state.cancelStep, state.step]);
 
   if (!open) {
     return null;
@@ -182,12 +178,18 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
     const api = window.miaoma?.export;
 
     if (!api) {
-      dispatch({ error: startError('Preload 桥接未加载，无法导出。'), type: 'start-failed' });
+      dispatch({
+        error: startError(EXPORT_DIALOG_COPY.error.bridgeMissing),
+        type: 'start-failed',
+      });
       return;
     }
 
     if (!state.targetPath) {
-      dispatch({ error: startError('请先选择导出位置。'), type: 'start-failed' });
+      dispatch({
+        error: startError(EXPORT_DIALOG_COPY.error.targetMissing),
+        type: 'start-failed',
+      });
       return;
     }
 
@@ -200,7 +202,9 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
       revision = await beforeStart();
     } catch (error) {
       dispatch({
-        error: startError(error instanceof Error ? error.message : '自动保存失败，导出已阻止。'),
+        error: startError(
+          error instanceof Error ? error.message : EXPORT_DIALOG_COPY.error.autosaveFailed,
+        ),
         type: 'start-failed',
       });
       return;
@@ -231,7 +235,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
         type: 'started',
       });
     } catch {
-      dispatch({ error: startError('无法启动导出，请重试。'), type: 'start-failed' });
+      dispatch({ error: startError(EXPORT_DIALOG_COPY.error.startFailed), type: 'start-failed' });
     }
   };
 
@@ -258,7 +262,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
         dispatch({ targetPath: response.data.path, type: 'target-changed' });
       }
     } catch {
-      setTargetError('无法打开保存对话框，请重试。');
+      setTargetError(EXPORT_DIALOG_COPY.error.targetLoadFailed);
     } finally {
       setLoadingTarget(false);
     }
@@ -278,7 +282,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
         setTargetError(response.error.message);
       }
     } catch {
-      setTargetError('无法打开文件夹，请手动到保存位置查看。');
+      setTargetError(EXPORT_DIALOG_COPY.error.revealFailed);
     }
   };
 
@@ -307,7 +311,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
         dispatch({ type: 'cancel-dismissed' });
       }
     } catch {
-      setCancelError('取消导出失败，请重试。');
+      setCancelError(EXPORT_DIALOG_COPY.error.cancelFailed);
       dispatch({ type: 'cancel-dismissed' });
     }
   };
@@ -315,40 +319,34 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
   const error = state.error;
   const progress = state.progress;
   const percent = clampPercent(progress?.percent ?? null);
-  const showPercent = state.step === 'running' && state.phase === 'rendering';
-  const title =
-    state.step === 'running'
-      ? exportPhaseLabel(state.phase)
-      : state.step === 'succeeded'
-        ? '导出完成'
-        : state.step === 'failed'
-          ? '导出失败'
-          : '渲染导出';
+  const running = state.step === 'running';
+  const showPercent = running && state.phase === 'rendering';
+  const title = exportDialogTitle(state.step, state.phase);
+  const outputRows = describeExportOutput(project);
 
   return (
     <div
-      className="ed-export-backdrop"
-      onMouseDown={(event) => {
-        if (event.target !== event.currentTarget) {
-          return;
-        }
+      // 导出进行中改成右下角浮层：编辑器与预览保持可见可播，编辑仍由会话锁定。
+      className={running ? 'ed-export-floating-layer' : 'ed-export-backdrop'}
+      onMouseDown={
+        running
+          ? undefined
+          : (event) => {
+              if (event.target !== event.currentTarget) {
+                return;
+              }
 
-        // 渲染中点遮罩不直接关闭，和 Esc/取消按钮一样先走取消确认。
-        if (state.step === 'running') {
-          requestCancel();
-          return;
-        }
-
-        if (!locked) {
-          onClose();
-        }
-      }}
+              if (!locked) {
+                onClose();
+              }
+            }
+      }
       role="presentation"
     >
       <section
         aria-labelledby="ed-export-title"
-        aria-modal="true"
-        className="ed-export-dialog"
+        aria-modal={running ? undefined : true}
+        className={running ? 'ed-export-dialog ed-export-dialog-floating' : 'ed-export-dialog'}
         role="dialog"
       >
         <h2 className="ed-export-title" id="ed-export-title">
@@ -357,9 +355,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
 
         {state.step === 'prepare' ? (
           <>
-            <p className="ed-export-description">
-              把当前时间线的画面、配音与音乐渲染为一个可播放的 MP4。开始前会自动保存当前编辑。
-            </p>
+            <p className="ed-export-description">{EXPORT_DIALOG_COPY.prepare.description}</p>
 
             {state.notice ? (
               <p className="ed-export-notice" role="status">
@@ -368,9 +364,12 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             ) : null}
 
             <div className="ed-export-path">
-              <span className="ed-export-label">保存位置</span>
+              <span className="ed-export-label">{EXPORT_DIALOG_COPY.prepare.targetLabel}</span>
               <span className="ed-export-path-value" title={state.targetPath}>
-                {state.targetPath || (loadingTarget ? '正在读取默认位置…' : '尚未选择')}
+                {state.targetPath ||
+                  (loadingTarget
+                    ? EXPORT_DIALOG_COPY.prepare.loadingTarget
+                    : EXPORT_DIALOG_COPY.prepare.noTarget)}
               </span>
               <button
                 className="ed-export-secondary"
@@ -378,22 +377,18 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
                 onClick={() => void chooseTarget()}
                 type="button"
               >
-                更改…
+                {EXPORT_DIALOG_COPY.action.changeTarget}
               </button>
             </div>
 
             <div className="ed-export-specs">
-              {OUTPUT_SPECS.map((spec) => (
+              {outputRows.map((spec) => (
                 <div className="ed-export-spec" key={spec.label}>
                   <span>{spec.label}</span>
                   <strong>{spec.value}</strong>
                 </div>
               ))}
             </div>
-
-            <p className="ed-export-note">
-              当前包含配音与音乐混音（源视频原声静音）；字幕与实时剩余时间显示已接入。
-            </p>
 
             {targetError ? <p className="ed-export-error">{targetError}</p> : null}
             {error ? <ExportErrorBlock error={error} /> : null}
@@ -405,7 +400,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
                 onClick={onClose}
                 type="button"
               >
-                取消
+                {EXPORT_DIALOG_COPY.action.cancel}
               </button>
               <button
                 className="ed-export-primary"
@@ -413,7 +408,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
                 onClick={() => void startExport()}
                 type="button"
               >
-                {state.busy ? '正在保存…' : '开始导出'}
+                {state.busy ? EXPORT_DIALOG_COPY.action.saving : EXPORT_DIALOG_COPY.action.start}
               </button>
             </div>
           </>
@@ -432,7 +427,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             {showPercent ? (
               <>
                 <div
-                  aria-label="导出进度"
+                  aria-label={EXPORT_DIALOG_COPY.progressLabel}
                   aria-valuemax={100}
                   aria-valuemin={0}
                   aria-valuenow={percent ?? 0}
@@ -447,27 +442,38 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
                 </div>
                 <ExportMetrics
                   rows={[
-                    { label: '预计剩余', value: formatExportEta(progress?.etaMs ?? null) },
-                    { label: '已用', value: formatExportElapsed(progress?.elapsedMs ?? 0) },
-                    { label: '速度', value: formatExportSpeed(progress?.speed ?? null) },
+                    {
+                      label: EXPORT_DIALOG_COPY.metric.eta,
+                      value: formatExportEta(progress?.etaMs ?? null),
+                    },
+                    {
+                      label: EXPORT_DIALOG_COPY.metric.elapsed,
+                      value: formatExportElapsed(progress?.elapsedMs ?? 0),
+                    },
+                    {
+                      label: EXPORT_DIALOG_COPY.metric.speed,
+                      value: formatExportSpeed(progress?.speed ?? null),
+                    },
                   ]}
                 />
               </>
             ) : null}
 
-            <p className="ed-export-description">
-              渲染完成前请勿关闭窗口；完成后成品会出现在保存位置。
-            </p>
+            <p className="ed-export-description">{EXPORT_DIALOG_COPY.running.description}</p>
             <p className="ed-export-path-value" title={state.targetPath}>
               {state.targetPath}
             </p>
 
             {state.cancelStep !== 'idle' ? (
-              <div aria-label="确认取消导出" className="ed-export-cancel-panel" role="alertdialog">
+              <div
+                aria-label={EXPORT_DIALOG_COPY.cancelPanelLabel}
+                className="ed-export-cancel-panel"
+                role="alertdialog"
+              >
                 <p className="ed-export-cancel-text">
                   {state.cancelStep === 'cancelling'
-                    ? '正在取消…'
-                    : '确定取消本次导出吗？已渲染的内容不会保留。'}
+                    ? EXPORT_DIALOG_COPY.running.cancelling
+                    : EXPORT_DIALOG_COPY.running.cancelPrompt}
                 </p>
                 <div className="ed-export-actions">
                   <button
@@ -476,7 +482,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
                     onClick={dismissCancel}
                     type="button"
                   >
-                    继续渲染
+                    {EXPORT_DIALOG_COPY.action.continueRendering}
                   </button>
                   <button
                     className="ed-export-primary"
@@ -484,14 +490,14 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
                     onClick={() => void confirmCancel()}
                     type="button"
                   >
-                    确认取消
+                    {EXPORT_DIALOG_COPY.action.confirmCancel}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="ed-export-actions">
                 <button className="ed-export-secondary" onClick={requestCancel} type="button">
-                  取消导出
+                  {EXPORT_DIALOG_COPY.action.cancelExport}
                 </button>
               </div>
             )}
@@ -502,31 +508,35 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
 
         {state.step === 'succeeded' ? (
           <>
-            <p className="ed-export-description">
-              成品已提交并通过同步自检，可以直接用常用播放器打开。
-            </p>
+            <p className="ed-export-description">{EXPORT_DIALOG_COPY.succeeded.description}</p>
             <p className="ed-export-path-value" title={state.outputPath ?? ''}>
               {state.outputPath}
             </p>
             {state.sync ? (
               <ExportMetrics
                 rows={[
-                  { label: '起点差', value: formatExportDelta(state.sync.startDeltaMs) },
-                  { label: '时长差', value: formatExportDelta(state.sync.durationDeltaMs) },
+                  {
+                    label: EXPORT_DIALOG_COPY.sync.startDelta,
+                    value: formatExportDelta(state.sync.startDeltaMs),
+                  },
+                  {
+                    label: EXPORT_DIALOG_COPY.sync.durationDelta,
+                    value: formatExportDelta(state.sync.durationDeltaMs),
+                  },
                 ]}
               />
             ) : null}
             {targetError ? <p className="ed-export-error">{targetError}</p> : null}
             <div className="ed-export-actions">
               <button className="ed-export-secondary" onClick={onClose} type="button">
-                关闭
+                {EXPORT_DIALOG_COPY.action.close}
               </button>
               <button
                 className="ed-export-primary"
                 onClick={() => void revealOutput()}
                 type="button"
               >
-                在文件夹中显示
+                {EXPORT_DIALOG_COPY.action.reveal}
               </button>
             </div>
           </>
@@ -537,14 +547,14 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             {error ? <ExportErrorBlock error={error} /> : null}
             <div className="ed-export-actions">
               <button className="ed-export-secondary" onClick={onClose} type="button">
-                关闭
+                {EXPORT_DIALOG_COPY.action.close}
               </button>
               <button
                 className="ed-export-primary"
                 onClick={() => dispatch({ type: 'retry' })}
                 type="button"
               >
-                重试
+                {EXPORT_DIALOG_COPY.action.retry}
               </button>
             </div>
           </>
@@ -586,7 +596,7 @@ function ExportErrorBlock({ error }: { error: ExportDialogError }) {
       ) : null}
       {error.detail ? (
         <details className="ed-export-detail">
-          <summary>查看失败详情</summary>
+          <summary>{EXPORT_DIALOG_COPY.error.detail}</summary>
           <pre>{error.detail}</pre>
         </details>
       ) : null}

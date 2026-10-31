@@ -19,6 +19,7 @@ export const EXPORT_MESSAGES = {
   staleRevision: '工程内容已更新，请重新打开导出。',
 
   ffmpegMissing: '未找到 FFmpeg，无法导出。',
+  ffprobeMissing: '未找到 FFprobe，无法完成导出自检，导出已阻止。',
   fontMissing: '缺少随包中文字体，无法烧录字幕，请重新安装完整版本。',
   targetUnwritable: '导出位置不可写，请选择其他文件夹。',
   targetIsDirectory: '导出位置是文件夹，请选择一个 .mp4 文件路径。',

@@ -279,6 +279,7 @@ function getExportService(): ExportService {
       return {
         ffmpegAvailable: media.ffmpegExists,
         ffmpegPath: media.ffmpegPath,
+        ffprobeAvailable: media.ffprobeExists,
         ffprobePath: media.ffprobePath,
       };
     },

@@ -29,6 +29,13 @@ const FFPROBE =
 const SAMPLE_RATE = 48_000;
 const FONT_FILE = path.resolve('resources/fonts/NotoSansSC-Regular.otf');
 const FONTS = { directory: path.dirname(FONT_FILE), files: [FONT_FILE] };
+/** 集成用例都跑在本机随包二进制上：媒体能力固定为全部可用。 */
+const SERVICE_MEDIA = {
+  ffmpegAvailable: true,
+  ffmpegPath: FFMPEG,
+  ffprobeAvailable: true,
+  ffprobePath: FFPROBE,
+} as const;
 const SOURCE_AUDIO_FREQUENCY = 2_000;
 const VOICE_FREQUENCY = 440;
 const MUSIC_FREQUENCY = 880;
@@ -508,7 +515,7 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
-      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
+      media: () => SERVICE_MEDIA,
       onProgress: (event) => progress.push(event),
       onState: (state) => states.push(state),
     });
@@ -591,6 +598,83 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
     expect(lastRed.b).toBeLessThan(100);
     expect(firstBlue.b).toBeGreaterThan(150);
     expect(firstBlue.r).toBeLessThan(100);
+  }, 120_000);
+
+  it('acceptance: exports a two-second synthetic project end to end with the sync self-check', async () => {
+    const root = tempRoot();
+    const media = path.join(root, 'media');
+    mkdirSync(media);
+    const first = path.join(media, 'red.mp4');
+    const second = path.join(media, 'blue.mp4');
+    const voice = path.join(media, 'voice.wav');
+    const music = path.join(media, 'music.wav');
+    generateClip(first, 'red');
+    generateClip(second, 'blue');
+    generateTone(voice, VOICE_FREQUENCY, 2);
+    generateTone(music, MUSIC_FREQUENCY, 2);
+
+    const store = new ProjectStore(path.join(root, 'projects'));
+    const created = store.create({ name: '验收工程' });
+    const projectId = created.project.projectId;
+    const fixture = createExportFixture({
+      audioPath: voice,
+      musicPath: music,
+      subtitle: { endMs: 2_000, text: '验收字幕' },
+      videoPaths: [first, second],
+    });
+    const saved = store.update({
+      expectedRevision: 0,
+      projectId,
+      project: { ...fixture, project: { ...fixture.project, name: '验收工程', projectId } },
+    });
+    const outputDirectory = path.join(root, '导出');
+    mkdirSync(outputDirectory);
+    const targetPath = path.join(outputDirectory, '验收成片.mp4');
+    const states: ExportState[] = [];
+    const service = new ExportService({
+      exportTempRoot: path.join(root, 'temp'),
+      getExportFonts: () => FONTS,
+      getProjectStore: () => store,
+      getSettings: () => ({ defaultProjectDirectory: root }),
+      getWorkflowStatus: () => null,
+      media: () => SERVICE_MEDIA,
+      onProgress: () => undefined,
+      onState: (state) => states.push(state),
+    });
+
+    await service.start({ expectedRevision: saved.project.contentRevision, projectId, targetPath });
+    await service.whenIdle();
+
+    // 弹窗可见的每个阶段都必须真实走一遍，包括同步自检。
+    expect(states.map((state) => state.status + ':' + state.phase)).toEqual([
+      'running:preparing',
+      'running:validating',
+      'running:mixing',
+      'running:rendering',
+      'running:verifying',
+      'running:committing',
+      'succeeded:committing',
+    ]);
+
+    const committed = states.at(-1);
+    const sync = committed?.sync;
+
+    expect(committed).toMatchObject({ outputPath: targetPath, status: 'succeeded' });
+    expect(sync).toBeDefined();
+    expect(Math.abs(sync?.startDeltaMs ?? Number.NaN)).toBeLessThanOrEqual(syncToleranceMs(30));
+    expect(Math.abs(sync?.durationDeltaMs ?? Number.NaN)).toBeLessThanOrEqual(syncToleranceMs(30));
+
+    const metadata = await probeVideo(FFPROBE, targetPath);
+
+    expect(metadata).toMatchObject({ codec: 'h264', height: 1080, width: 1920 });
+    expect(metadata?.audio?.codec).toBe('aac');
+    expect(Math.abs((metadata?.durationMs ?? 0) - 2_000)).toBeLessThanOrEqual(syncToleranceMs(30));
+
+    // 成品提交后不留下任何临时产物。
+    expect(existsSync(targetPath)).toBe(true);
+    expect(
+      readdirSync(outputDirectory).filter((name) => name.startsWith('.miaoma-export-')),
+    ).toEqual([]);
   }, 120_000);
 
   it('cancels a real render without committing and cleans every temp artifact', async () => {
@@ -678,7 +762,7 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
-      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
+      media: () => SERVICE_MEDIA,
       onProgress: (event) => {
         // 第一条真实进度到达后取消，覆盖“渲染阶段取消”的真实链路。
         if (
@@ -806,7 +890,7 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
-      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
+      media: () => SERVICE_MEDIA,
       onProgress: () => undefined,
       onState: (state) => states.push(state),
     });
@@ -934,7 +1018,7 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
-      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
+      media: () => SERVICE_MEDIA,
       onProgress: () => undefined,
       onState: (state) => states.push(state),
     });

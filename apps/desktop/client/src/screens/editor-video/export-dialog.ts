@@ -1,14 +1,138 @@
+import type { VideoProject } from '@miaoma/video-project';
 import { EXPORT_CANCELLED_NOTICE } from '../../../../shared/export-copy';
-import type {
-  ExportIssue,
-  ExportPhase,
-  ExportProgress,
-  ExportState,
-  ExportSyncSummary,
-  IpcErrorCode,
+import { shouldBurnSubtitles } from '../../../../shared/subtitle-burn';
+import {
+  EXPORT_OUTPUT_SPEC,
+  type ExportIssue,
+  type ExportPhase,
+  type ExportProgress,
+  type ExportState,
+  type ExportSyncSummary,
+  type IpcErrorCode,
 } from '../../../../shared/ipc-contract';
 
 export { EXPORT_CANCELLED_NOTICE } from '../../../../shared/export-copy';
+
+/**
+ * 导出弹窗的面向用户文案集中在这里（成功/失败/取消/参数区）。
+ * 主进程的错误文案在 `main/export/messages.ts`；渲染进程自有的提示与按钮在这里，
+ * 组件只引用常量，避免同一句话在弹窗与 reducer 各写一份。
+ */
+export const EXPORT_DIALOG_COPY = {
+  action: {
+    cancel: '取消',
+    cancelExport: '取消导出',
+    changeTarget: '更改…',
+    close: '关闭',
+    confirmCancel: '确认取消',
+    continueRendering: '继续渲染',
+    retry: '重试',
+    reveal: '在文件夹中显示',
+    saving: '正在保存…',
+    start: '开始导出',
+  },
+  error: {
+    autosaveFailed: '自动保存失败，导出已阻止。',
+    bridgeMissing: 'Preload 桥接未加载，无法导出。',
+    cancelFailed: '取消导出失败，请重试。',
+    exportFailed: '导出失败，请重试。',
+    revealFailed: '无法打开文件夹，请手动到保存位置查看。',
+    startFailed: '无法启动导出，请重试。',
+    detail: '查看失败详情',
+    targetLoadFailed: '无法打开保存对话框，请重试。',
+    targetMissing: '请先选择导出位置。',
+  },
+  cancelPanelLabel: '确认取消导出',
+  metric: {
+    elapsed: '已用',
+    eta: '预计剩余',
+    speed: '速度',
+  },
+  /** 参数区与结果区展示的成片事实。 */
+  output: {
+    burnSubtitles: '烧录',
+    muteSourceAudio: '静音',
+    skipSubtitles: '不烧录',
+  },
+  progressLabel: '导出进度',
+  prepare: {
+    description: '把当前时间线的画面、配音与音乐渲染为一个可播放的 MP4。开始前会自动保存当前编辑。',
+    loadingTarget: '正在读取默认位置…',
+    noTarget: '尚未选择',
+    targetLabel: '保存位置',
+  },
+  running: {
+    cancelPrompt: '确定取消本次导出吗？已渲染的内容不会保留。',
+    cancelling: '正在取消…',
+    description: '渲染完成前请勿关闭窗口；完成后成品会出现在保存位置。',
+  },
+  spec: {
+    audio: '音轨',
+    container: '容器',
+    frame: '画面',
+    sourceAudio: '源声',
+    subtitles: '字幕',
+    videoCodec: '视频编码',
+  },
+  succeeded: {
+    description: '成品已提交并通过同步自检，可以直接用常用播放器打开。',
+  },
+  sync: {
+    durationDelta: '时长差',
+    startDelta: '起点差',
+  },
+  title: {
+    failed: '导出失败',
+    prepare: '渲染导出',
+    succeeded: '导出完成',
+  },
+} as const;
+
+/** 参数区一行：标签 + 已经格式化好的值。 */
+export interface ExportDialogOutputRow {
+  label: string;
+  value: string;
+}
+
+/**
+ * 参数区展示的固定输出规格，外加随工程即时变化的字幕烧录与源声状态。
+ *
+ * 烧录状态与主进程共用 `shouldBurnSubtitles`（轨道可见 + 至少一条有效片段）；
+ * v1 的 RenderConfig 固定源声静音，因此源声一栏是固定事实而不是开关。
+ */
+export function describeExportOutput(
+  project: Pick<VideoProject, 'render' | 'tracks'>,
+): ExportDialogOutputRow[] {
+  const burnsSubtitles = shouldBurnSubtitles(project);
+  const { audioBitrateKbps, audioCodec, container, fps, height, videoCodec, width } =
+    EXPORT_OUTPUT_SPEC;
+
+  return [
+    { label: EXPORT_DIALOG_COPY.spec.container, value: container.toUpperCase() },
+    {
+      label: EXPORT_DIALOG_COPY.spec.frame,
+      value: width + '×' + height + ' · ' + fps + 'fps',
+    },
+    {
+      label: EXPORT_DIALOG_COPY.spec.videoCodec,
+      value: videoCodec === 'h264' ? 'H.264' : videoCodec,
+    },
+    {
+      label: EXPORT_DIALOG_COPY.spec.audio,
+      value: audioCodec.toUpperCase() + ' ' + audioBitrateKbps + 'kbps',
+    },
+    {
+      label: EXPORT_DIALOG_COPY.spec.subtitles,
+      value: burnsSubtitles
+        ? EXPORT_DIALOG_COPY.output.burnSubtitles
+        : EXPORT_DIALOG_COPY.output.skipSubtitles,
+    },
+    {
+      label: EXPORT_DIALOG_COPY.spec.sourceAudio,
+      value: EXPORT_DIALOG_COPY.output.muteSourceAudio,
+    },
+  ];
+}
 
 export type ExportDialogStep = 'failed' | 'prepare' | 'running' | 'succeeded';
 
@@ -73,6 +197,23 @@ export const EXPORT_PHASE_LABELS: Record<ExportPhase, string> = {
 
 export function exportPhaseLabel(phase: ExportPhase): string {
   return EXPORT_PHASE_LABELS[phase] ?? '导出处理中';
+}
+
+/** 弹窗标题：准备、完成、失败三态各自一句；渲染中直接用阶段文案。 */
+export function exportDialogTitle(step: ExportDialogStep, phase: ExportPhase): string {
+  if (step === 'running') {
+    return exportPhaseLabel(phase);
+  }
+
+  if (step === 'succeeded') {
+    return EXPORT_DIALOG_COPY.title.succeeded;
+  }
+
+  if (step === 'failed') {
+    return EXPORT_DIALOG_COPY.title.failed;
+  }
+
+  return EXPORT_DIALOG_COPY.title.prepare;
 }
 
 /** 失败原因里的问题定位：把分镜/片段/素材/字段拼成一句可读说明。 */
@@ -182,7 +323,7 @@ function stateFromEvent(state: ExportDialogState, event: ExportState): ExportDia
         ...(event.error.issues ? { issues: event.error.issues } : {}),
         message: event.error.message,
       }
-    : { message: '导出失败，请重试。' };
+    : { message: EXPORT_DIALOG_COPY.error.exportFailed };
 
   return {
     ...base,

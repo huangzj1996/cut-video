@@ -81,7 +81,12 @@ function createService(overrides: Partial<ExportServiceOptions> = {}): {
     getProjectStore: () => store,
     getSettings: () => ({ defaultProjectDirectory: root }),
     getWorkflowStatus: () => null,
-    media: () => ({ ffmpegAvailable: true, ffmpegPath: 'ffmpeg', ffprobePath: 'ffprobe' }),
+    media: () => ({
+      ffmpegAvailable: true,
+      ffmpegPath: 'ffmpeg',
+      ffprobeAvailable: true,
+      ffprobePath: 'ffprobe',
+    }),
     onProgress: (event) => progress.push(event),
     onState: (event) => states.push(event),
     ...overrides,

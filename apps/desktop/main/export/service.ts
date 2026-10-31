@@ -32,7 +32,8 @@ import {
 export interface ExportServiceMedia {
   ffmpegAvailable: boolean;
   ffmpegPath: string;
-  /** 同步自检用它读取成片事实；缺失时自检 fail closed，不提交成品。 */
+  ffprobeAvailable: boolean;
+  /** 同步自检用它读取成片事实；缺失时前置校验就会拦下。 */
   ffprobePath: string;
 }
 
@@ -173,6 +174,7 @@ export class ExportService {
       {
         expectedRevision: input.expectedRevision,
         ffmpegAvailable: media.ffmpegAvailable,
+        ffprobeAvailable: media.ffprobeAvailable,
         fonts,
         project,
         targetPath,

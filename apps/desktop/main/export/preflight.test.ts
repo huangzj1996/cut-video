@@ -36,6 +36,7 @@ function report(passed: boolean, errors: ValidationReport['errors'] = []): Valid
 interface PreflightOverrides {
   expectedRevision?: number;
   ffmpegAvailable?: boolean;
+  ffprobeAvailable?: boolean;
   fonts?: ExportPreflightInput['fonts'];
   workflowStatus?: ExportPreflightInput['workflowStatus'];
 }
@@ -48,6 +49,7 @@ function preflightInput(
   return {
     expectedRevision: project.project.contentRevision,
     ffmpegAvailable: true,
+    ffprobeAvailable: true,
     fonts: EXPORT_TEST_FONTS,
     project,
     targetPath,
@@ -137,6 +139,20 @@ describe('export preflight', () => {
     );
 
     expect(error?.code).toBe('EXPORT_RENDER_FAILED');
+    expect(error?.message).toContain('FFmpeg');
+  });
+
+  it('blocks export with a clear message when ffprobe is unavailable', () => {
+    const root = tempRoot();
+    const error = validateExportPreflight(
+      preflightInput(createExportFixture(), path.join(root, '成片.mp4'), {
+        ffprobeAvailable: false,
+      }),
+      { validate: () => report(true) },
+    );
+
+    expect(error?.code).toBe('EXPORT_RENDER_FAILED');
+    expect(error?.message).toContain('FFprobe');
   });
 
   it('blocks export when the bundled subtitle font is missing', () => {

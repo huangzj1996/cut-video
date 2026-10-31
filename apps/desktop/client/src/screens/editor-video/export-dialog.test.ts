@@ -1,15 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import type { ExportProgress, ExportState } from '../../../../shared/ipc-contract';
+import type { ExportPhase, ExportProgress, ExportState } from '../../../../shared/ipc-contract';
 import {
   createExportDialogState,
+  describeExportOutput,
   EXPORT_CANCELLED_NOTICE,
+  EXPORT_DIALOG_COPY,
   exportDialogReducer,
+  exportDialogTitle,
   exportIssueLocation,
   exportIssueText,
   exportPhaseLabel,
   isExportDialogLocked,
+  type ExportDialogOutputRow,
   type ExportDialogState,
 } from './export-dialog';
+import { createEditingProject } from './test-support/editing-project';
+
+const EXPORT_PHASES: ExportPhase[] = [
+  'preparing',
+  'validating',
+  'mixing',
+  'rendering',
+  'verifying',
+  'committing',
+];
+
+function rowValue(rows: ExportDialogOutputRow[], label: string): string {
+  const row = rows.find((candidate) => candidate.label === label);
+
+  if (!row) {
+    throw new Error('missing row ' + label);
+  }
+
+  return row.value;
+}
+
+function collectStrings(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectStrings(item));
+  }
+
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).flatMap((item) => collectStrings(item));
+  }
+
+  return [];
+}
 
 function runningState(overrides: Partial<ExportState> = {}): ExportState {
   return {
@@ -91,6 +131,82 @@ describe('exportIssueLocation', () => {
       }),
     ).toBe('字段 crop');
     expect(exportIssueLocation({ code: 'EXPORT_VALIDATION_FAILED', message: '失败。' })).toBeNull();
+  });
+});
+
+describe('describeExportOutput', () => {
+  it('lists the fixed output spec plus subtitle and source-audio state', () => {
+    const rows = describeExportOutput(createEditingProject());
+
+    expect(rows.map((row) => row.label)).toEqual([
+      '容器',
+      '画面',
+      '视频编码',
+      '音轨',
+      '字幕',
+      '源声',
+    ]);
+    expect(rowValue(rows, '容器')).toBe('MP4');
+    expect(rowValue(rows, '画面')).toBe('1920×1080 · 30fps');
+    expect(rowValue(rows, '视频编码')).toBe('H.264');
+    expect(rowValue(rows, '音轨')).toBe('AAC 192kbps');
+    expect(rowValue(rows, '字幕')).toBe('烧录');
+    expect(rowValue(rows, '源声')).toBe('静音');
+  });
+
+  it('does not claim subtitles are burned when the track is hidden, empty or absent', () => {
+    const project = createEditingProject();
+    const hidden = {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.kind === 'subtitle' ? { ...track, visible: false } : track,
+      ),
+    };
+    const empty = {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.kind === 'subtitle' ? { ...track, clips: [] } : track,
+      ),
+    };
+    const withoutTrack = {
+      ...project,
+      tracks: project.tracks.filter((track) => track.kind !== 'subtitle'),
+    };
+
+    expect(rowValue(describeExportOutput(hidden), '字幕')).toBe('不烧录');
+    expect(rowValue(describeExportOutput(empty), '字幕')).toBe('不烧录');
+    expect(rowValue(describeExportOutput(withoutTrack), '字幕')).toBe('不烧录');
+  });
+});
+
+describe('export dialog copy', () => {
+  it('labels every export phase in Chinese', () => {
+    for (const phase of EXPORT_PHASES) {
+      expect(exportPhaseLabel(phase)).not.toHaveLength(0);
+    }
+
+    expect(exportPhaseLabel('rendering')).toBe('渲染视频');
+    expect(exportPhaseLabel('committing')).toBe('提交成品');
+    expect(exportPhaseLabel('verifying')).toBe('同步自检');
+  });
+
+  it('titles the dialog by step and phase', () => {
+    expect(exportDialogTitle('prepare', 'preparing')).toBe('渲染导出');
+    expect(exportDialogTitle('running', 'validating')).toBe('前置校验');
+    expect(exportDialogTitle('running', 'mixing')).toBe('预混音轨');
+    expect(exportDialogTitle('running', 'verifying')).toBe('同步自检');
+    expect(exportDialogTitle('succeeded', 'committing')).toBe('导出完成');
+    expect(exportDialogTitle('failed', 'verifying')).toBe('导出失败');
+  });
+
+  it('keeps every dialog string free of placeholder wording', () => {
+    const strings = collectStrings(EXPORT_DIALOG_COPY);
+
+    expect(strings.length).toBeGreaterThan(20);
+
+    for (const text of strings) {
+      expect(text).not.toMatch(/占位|待接入|TODO|FIXME|示例文案/);
+    }
   });
 });
 
@@ -431,8 +547,62 @@ describe('export dialog reducer', () => {
     expect(reset).toEqual(createExportDialogState('project-1', 'C:/out.mp4'));
   });
 
-  it('labels each export phase in Chinese', () => {
-    expect(exportPhaseLabel('rendering')).toBe('渲染视频');
-    expect(exportPhaseLabel('committing')).toBe('提交成品');
+  it('walks every export phase from prepare to succeeded', () => {
+    let state = exportDialogReducer(createExportDialogState('project-1', 'C:/out.mp4'), {
+      type: 'start-requested',
+    });
+    state = exportDialogReducer(state, {
+      runId: 'run-1',
+      targetPath: 'C:/out.mp4',
+      type: 'started',
+    });
+
+    for (const phase of EXPORT_PHASES) {
+      state = exportDialogReducer(state, {
+        state: runningState({ phase, status: 'running' }),
+        type: 'state',
+      });
+
+      expect(state.step).toBe('running');
+      expect(state.phase).toBe(phase);
+    }
+
+    state = exportDialogReducer(state, {
+      state: runningState({
+        outputPath: 'C:/out.mp4',
+        phase: 'committing',
+        status: 'succeeded',
+        sync: { durationDeltaMs: 0, startDeltaMs: 0 },
+      }),
+      type: 'state',
+    });
+
+    expect(state.step).toBe('succeeded');
+    expect(state.phase).toBe('committing');
+    expect(isExportDialogLocked(state)).toBe(false);
+  });
+
+  it('stops at failed and only restarts from prepare after retry', () => {
+    let state = startedState();
+    state = exportDialogReducer(state, {
+      state: runningState({
+        error: { code: 'EXPORT_SYNC_CHECK_FAILED', message: '同步自检未通过。' },
+        phase: 'verifying',
+        status: 'failed',
+      }),
+      type: 'state',
+    });
+
+    expect(state.step).toBe('failed');
+    expect(state.phase).toBe('verifying');
+    expect(isExportDialogLocked(state)).toBe(false);
+
+    const ignored = exportDialogReducer(state, { type: 'start-requested' });
+    expect(ignored.step).toBe('failed');
+
+    state = exportDialogReducer(state, { type: 'retry' });
+    expect(state.step).toBe('prepare');
+    expect(state.phase).toBe('preparing');
+    expect(state.error).toBeNull();
   });
 });

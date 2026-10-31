@@ -32,6 +32,8 @@ export interface ExportPreflightInput {
   /** 发起导出时渲染进程看到的修订；与当前修订不一致即为过期。 */
   expectedRevision: number;
   ffmpegAvailable: boolean;
+  /** ffprobe 用于导出后的同步自检；缺失时提前拦下，避免渲染完才发现无法校验。 */
+  ffprobeAvailable: boolean;
   /** 随包字体；null 表示字体缺失，导出必须先被拦下。 */
   fonts: ExportFonts | null;
   /** 当前工程；草稿工程没有 `ai`，不能导出。 */
@@ -188,6 +190,10 @@ export function validateExportPreflight(
 
   if (!input.ffmpegAvailable) {
     return { code: 'EXPORT_RENDER_FAILED', message: EXPORT_MESSAGES.ffmpegMissing };
+  }
+
+  if (!input.ffprobeAvailable) {
+    return { code: 'EXPORT_RENDER_FAILED', message: EXPORT_MESSAGES.ffprobeMissing };
   }
 
   // 随包字体是烧录字幕的前提：缺失时明确报错，不让 ffmpeg 静默回退到系统字体。

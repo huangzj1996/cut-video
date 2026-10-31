@@ -1,5 +1,6 @@
 import type { SubtitleClip, SubtitleTrack, VideoProject } from '@miaoma/video-project';
 import { EXPORT_OUTPUT_SPEC } from '../../shared/ipc-contract';
+import { isRenderableSubtitleClip, shouldBurnSubtitles } from '../../shared/subtitle-burn';
 import { subtitlePresetStyle } from '../../shared/subtitle-presets';
 import { EXPORT_FONT_FAMILY } from './fonts';
 
@@ -205,11 +206,12 @@ function findSubtitleTrack(project: VideoProject): SubtitleTrack | undefined {
 }
 
 function dialogueLine(clip: SubtitleClip): string | null {
-  const lines = wrapSubtitleText(clip.text);
-
-  if (lines.length === 0 || clip.endMs <= clip.startMs) {
+  // 空白文本与零/负时长片段不会进入 ASS；这条判定与预览/弹窗共用同一份规则。
+  if (!isRenderableSubtitleClip(clip)) {
     return null;
   }
+
+  const lines = wrapSubtitleText(clip.text);
 
   const startCentiseconds = Math.max(0, Math.round(clip.startMs / 10));
   const endCentiseconds = Math.max(startCentiseconds + 1, Math.round(clip.endMs / 10));
@@ -260,19 +262,19 @@ function buildStyleLine(track: SubtitleTrack): string {
 
 /**
  * 把工程字幕轨编译成一份可烧录的 ASS 文档；返回 null 表示这次导出不烧录字幕
- * （轨道不存在、轨道不可见、没有有效字幕，或 RenderConfig 没开 burnSubtitles）。
+ * （轨道不存在、轨道不可见或没有有效字幕）。
  * 纯函数：不读磁盘、不启动进程。
  */
 export function buildSubtitleDocument(project: VideoProject): string | null {
-  const burnSubtitles: boolean = project.render.burnSubtitles;
-
-  if (!burnSubtitles) {
+  // 工程开关、轨道可见性与有效字幕三条规则与导出弹窗共用，避免两处判定漂移。
+  if (!shouldBurnSubtitles(project)) {
     return null;
   }
 
   const track = findSubtitleTrack(project);
 
-  if (!track || !track.visible) {
+  // shouldBurnSubtitles 已保证存在；这里只为类型窄化。
+  if (!track) {
     return null;
   }
 

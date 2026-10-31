@@ -22,11 +22,9 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "clean": "pnpm -r --if-present clean",
-    "sandcastle": "npx tsx .sandcastle/main.mts"
+    "clean": "pnpm -r --if-present clean"
   },
   "devDependencies": {
-    "@ai-hero/sandcastle": "^0.12.0",
     "@eslint/js": "10.0.1",
     "@types/node": "20.19.43",
     "eslint": "10.13.0",
@@ -37,3 +35,6 @@
     "zod": "^4"
   }
 }
+
+
+

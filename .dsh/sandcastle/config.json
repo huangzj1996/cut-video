@@ -1,9 +1,0 @@
-{
-  "label": "Sandcastle",
-  "baseBranch": "feat/keyframe-extraction",
-  "branchPrefix": "sandcastle/issue-",
-  "worktreeDir": ".worktrees",
-  "concurrency": 5,
-  "maxRounds": 10,
-  "prepare": "install"
-}

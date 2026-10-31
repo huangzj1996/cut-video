@@ -40,4 +40,4 @@ Reviewer 与 implementer 都按这份标准执行。内容来自仓库现有配�
 
 - Conventional Commits：`feat: ...` / `fix: ...` / `refactor: ...` / `chore: ...` / `test: ...`。
 - 正文用 `-` 列表写关键决策，结尾引用 issue：`Refs #<issue>`。
-- 一个 issue 一个分支（`sandcastle/issue-<N>`），不在分支里混入其他 issue 的改动。
+- 一个 issue 一个分支（`issue-<N>`），不在分支里混入其他 issue 的改动。

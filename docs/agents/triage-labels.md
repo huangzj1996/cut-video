@@ -10,11 +10,12 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 
+When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
+
 ## Project-specific labels
 
-| Label        | Meaning                                                                 |
-| ------------ | ----------------------------------------------------------------------- |
-| `Sandcastle` | Ticket is executable by the Sandcastle agent workflow.                  |
-| `prd`        | Spec/PRD parent issue. Never executed directly; its children are tickets. |
+| Label | Meaning                                                                    |
+| ----- | -------------------------------------------------------------------------- |
+| `prd` | Spec/PRD parent issue. Never executed directly; its children are tickets. |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
+Edit the "Label in our tracker" column to match whatever vocabulary you actually use.

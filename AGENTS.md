@@ -2,11 +2,11 @@
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues in this repo. Sandcastle-executable tickets carry both `Sandcastle` and `ready-for-agent`. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues in this repo. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Default five-label vocabulary plus the project-specific `Sandcastle` and `prd` labels. See `docs/agents/triage-labels.md`.
+Default five-role vocabulary plus the project-specific `prd` label (spec parent). See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

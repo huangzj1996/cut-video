@@ -16,7 +16,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 28px;
+  margin-bottom: 26px;
 }
 
 .ed-subtitle-title-group {
@@ -76,8 +76,13 @@
   background: var(--ed-red);
 }
 
-.ed-subtitle-switch:hover {
+.ed-subtitle-switch:hover:not(:disabled) {
   filter: brightness(1.08);
+}
+
+.ed-subtitle-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .ed-subtitle-switch-knob {
@@ -177,14 +182,14 @@
 }
 
 .ed-subtitle-slider::-webkit-slider-thumb {
+  box-sizing: border-box;
   width: 16px;
   height: 16px;
   margin-top: -5px;
-  border: 0;
+  border: 3px solid #0e0f12;
   border-radius: 50%;
   appearance: none;
   background: #fff;
-  box-shadow: 0 0 0 1px #0e0f12;
 }
 
 .ed-subtitle-slider::-moz-range-track {
@@ -200,9 +205,10 @@
 }
 
 .ed-subtitle-slider::-moz-range-thumb {
+  box-sizing: border-box;
   width: 16px;
   height: 16px;
-  border: 1px solid #0e0f12;
+  border: 3px solid #0e0f12;
   border-radius: 50%;
   background: #fff;
 }
@@ -221,22 +227,29 @@
   height: 36px;
   place-items: center;
   padding: 0;
-  border: 1px solid var(--preset-border, #343841);
+  border: 1px solid #343841;
   border-radius: 8px;
-  background: var(--preset-bg, #111214);
+  background: #111214;
   cursor: pointer;
   transition:
     border-color 150ms ease,
     background 150ms ease;
 }
 
+/* Pen Z87wb0：当前样式是红边 + 深绿底；其余样式 hover 时填充 #3A3B3E。 */
 .ed-subtitle-preset.is-active {
   border-color: var(--ed-red);
   background: #0d201b;
 }
 
 .ed-subtitle-preset:not(.is-active):not(:disabled):hover {
-  border-color: #5a5e66;
+  border-color: #4a4c52;
+  background: #3a3b3e;
+}
+
+.ed-subtitle-preset:focus-visible {
+  outline: 2px solid var(--ed-red);
+  outline-offset: 2px;
 }
 
 .ed-subtitle-preset:disabled {
@@ -267,27 +280,18 @@
   line-height: 17px;
 }
 
-.ed-subtitle-apply {
-  padding: 0;
-  border: 0;
-  background: none;
+.ed-subtitle-preset-scope {
   color: var(--ed-muted);
   font-family: inherit;
   font-size: 11px;
   font-weight: 650;
   line-height: 16px;
   white-space: nowrap;
-  cursor: pointer;
 }
 
-.ed-subtitle-apply:hover:not(:disabled) {
-  color: var(--ed-text);
-}
-
-.ed-subtitle-apply:disabled {
-  cursor: not-allowed;
-}
-
-.ed-subtitle-panel.is-disabled .ed-subtitle-card {
-  opacity: 0.45;
+.ed-subtitle-empty {
+  margin: 0;
+  color: var(--ed-muted);
+  font-size: 12px;
+  line-height: 18px;
 }

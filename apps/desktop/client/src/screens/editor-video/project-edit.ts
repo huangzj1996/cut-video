@@ -1,8 +1,10 @@
+import { SubtitleStyleSchema } from '@miaoma/video-project';
 import type {
   MusicAsset,
   MusicClip,
   Scene,
   SubtitleClip,
+  SubtitlePresetId,
   VideoClip,
   VideoProject,
   VoiceClip,
@@ -112,6 +114,17 @@ export type EditAction =
       /** 把整条音乐轨的音量设置成同一值（0–1）。 */
       type: 'set-music-volume';
       volume: number;
+    }
+  | {
+      /** 整条字幕轨的样式；只改传入的字段，应用范围是整条字幕轨。 */
+      type: 'set-subtitle-style';
+      presetId?: SubtitlePresetId;
+      fontSize?: number;
+    }
+  | {
+      /** 字幕轨显示开关；只改可见性，不删除片段或样式。 */
+      type: 'set-subtitle-visible';
+      visible: boolean;
     };
 
 export type EditRejectionCode =
@@ -132,6 +145,8 @@ export type EditRejectionCode =
   | 'EDIT_MUSIC_VOLUME_INVALID'
   | 'EDIT_SOURCE_ASSET_MISSING'
   | 'EDIT_SOURCE_RANGE_EXCEEDED'
+  | 'EDIT_SUBTITLE_STYLE_INVALID'
+  | 'EDIT_SUBTITLE_TRACK_MISSING'
   | 'EDIT_SPLIT_OUTSIDE_CLIP'
   | 'EDIT_SPLIT_TOO_CLOSE_TO_EDGE'
   | 'EDIT_TRIM_INVALID_DELTA'
@@ -1313,6 +1328,68 @@ function setMusicVolume(project: VideoProject, volume: number): EditResult {
   });
 }
 
+/**
+ * 字幕样式是轨道级设置：所有字幕片段共用同一份颜色/描边/字号，
+ * 面板一改，预览叠层（读 track.style）立即跟着变。
+ */
+function setSubtitleStyle(
+  project: VideoProject,
+  presetId: SubtitlePresetId | undefined,
+  fontSize: number | undefined,
+): EditResult {
+  const track = findTrack(project, 'subtitle');
+
+  if (!track) {
+    return reject('EDIT_SUBTITLE_TRACK_MISSING', '当前工程没有字幕轨。');
+  }
+
+  if (presetId === undefined && fontSize === undefined) {
+    return { changed: false, ok: true, project };
+  }
+
+  const nextStyle = {
+    fontSize: fontSize ?? track.style.fontSize,
+    presetId: presetId ?? track.style.presetId,
+  };
+  const parsed = SubtitleStyleSchema.safeParse(nextStyle);
+
+  if (!parsed.success) {
+    return reject(
+      'EDIT_SUBTITLE_STYLE_INVALID',
+      '字幕样式无效：字号需为 24–72 的整数，样式必须是预设之一。',
+    );
+  }
+
+  if (
+    parsed.data.fontSize === track.style.fontSize &&
+    parsed.data.presetId === track.style.presetId
+  ) {
+    return { changed: false, ok: true, project };
+  }
+
+  return commitEdit(project, {
+    ...project,
+    tracks: replaceTracks(project, { ...track, style: parsed.data }),
+  });
+}
+
+function setSubtitleVisible(project: VideoProject, visible: boolean): EditResult {
+  const track = findTrack(project, 'subtitle');
+
+  if (!track) {
+    return reject('EDIT_SUBTITLE_TRACK_MISSING', '当前工程没有字幕轨。');
+  }
+
+  if (track.visible === visible) {
+    return { changed: false, ok: true, project };
+  }
+
+  return commitEdit(project, {
+    ...project,
+    tracks: replaceTracks(project, { ...track, visible }),
+  });
+}
+
 function reorderScene(
   project: VideoProject,
   action: Extract<EditAction, { type: 'reorder-scene' }>,
@@ -1434,5 +1511,11 @@ export function applyEdit(project: VideoProject, action: EditAction): EditResult
 
     case 'set-music-volume':
       return setMusicVolume(project, action.volume);
+
+    case 'set-subtitle-style':
+      return setSubtitleStyle(project, action.presetId, action.fontSize);
+
+    case 'set-subtitle-visible':
+      return setSubtitleVisible(project, action.visible);
   }
 }

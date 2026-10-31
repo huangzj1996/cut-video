@@ -288,6 +288,7 @@ function EditorWorkspace({
   const [activeRail, setActiveRail] = useState<EditorRailId>('video');
   const [muted, setMuted] = useState(false);
   const [musicVolumePreview, setMusicVolumePreview] = useState<number | null>(null);
+  const [subtitleFontSizePreview, setSubtitleFontSizePreview] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [timecodeEditing, setTimecodeEditing] = useState(false);
   const [timecodeDraft, setTimecodeDraft] = useState('');
@@ -350,8 +351,8 @@ function EditorWorkspace({
       : plan;
   }, [currentTime, musicVolumePreview, session.project]);
   const subtitleOverlay = useMemo(
-    () => resolveSubtitleOverlay(session.project, currentTime),
-    [currentTime, session.project],
+    () => resolveSubtitleOverlay(session.project, currentTime, subtitleFontSizePreview),
+    [currentTime, session.project, subtitleFontSizePreview],
   );
   const hasVoiceTrack = useMemo(() => trackHasClips(session.project, 'voice'), [session.project]);
   const hasMusicTrack = useMemo(() => trackHasClips(session.project, 'music'), [session.project]);
@@ -1773,7 +1774,12 @@ function EditorWorkspace({
           ) : activeRail === 'voice' ? (
             <VoicePanel />
           ) : activeRail === 'subtitle' ? (
-            <SubtitlePanel />
+            <SubtitlePanel
+              onEdit={performEdit}
+              onFontSizePreview={setSubtitleFontSizePreview}
+              project={session.project}
+              readonly={session.readonly || session.saveStatus === 'conflict'}
+            />
           ) : (
             <MusicPanel
               onEdit={performEdit}

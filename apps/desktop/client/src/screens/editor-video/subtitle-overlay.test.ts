@@ -276,4 +276,21 @@ describe('subtitle preset mapping', () => {
       });
     }
   });
+
+  it('previews a draft font size before the edit is committed', () => {
+    const overlay = resolveSubtitleOverlay(
+      makeProject({ style: { fontSize: 42, presetId: 'white-outline' } }),
+      2.5,
+      64,
+    );
+
+    expect(overlay?.fontSize).toBe(64);
+    expect(overlay?.fontSizeCss).toBe(subtitleFontSizeCss(64));
+  });
+
+  it('clamps an out-of-range draft font size to the schema bounds', () => {
+    const overlay = resolveSubtitleOverlay(makeProject(), 2.5, 200);
+
+    expect(overlay?.fontSize).toBe(SUBTITLE_FONT_SIZE_MAX);
+  });
 });

@@ -1,26 +1,103 @@
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { SUBTITLE_PRESET_IDS } from '@miaoma/video-project';
-import type { SubtitlePresetId } from '@miaoma/video-project';
+import type { SubtitlePresetId, VideoProject } from '@miaoma/video-project';
+import type { EditAction } from '../editor-video/project-edit';
+import { SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN } from '../editor-video/subtitle-overlay';
 import { SUBTITLE_PRESET_STYLES } from '../subtitle-presets';
 import './subtitle-panel.css';
 
 /**
- * 字幕面板首版保持 mock：样式卡与预览共用同一份预设，写操作全部禁用并标注"后续"。
+ * 字幕设置面板：显示开关、字号与样式都是轨道级设置，全部经 `applyEdit` 写入工程，
+ * 因此会走编辑器的自动保存、撤销与只读拦截。预览叠层读同一份 `track.style`，
+ * 面板选中样式/字号后预览立即一致；拖动字号时只把未提交值透传给预览做实时反馈。
  */
 
-/** 样式卡与预览字幕叠层共用同一份预设颜色/描边，避免两处显示不一致。 */
 const PRESETS = SUBTITLE_PRESET_IDS.map((id) => ({ ...SUBTITLE_PRESET_STYLES[id], id }));
 
-const FONT_SIZE_MIN = 24;
-const FONT_SIZE_MAX = 72;
-const CURRENT_FONT_SIZE = 42;
-const CURRENT_PRESET_ID: SubtitlePresetId = 'white-outline';
+interface SubtitlePanelProps {
+  onEdit: (action: EditAction) => void;
+  /** 拖动字号时把未提交值透传给预览；提交、失焦或卸载时传 null 还原。 */
+  onFontSizePreview: (fontSize: number | null) => void;
+  project: VideoProject;
+  readonly: boolean;
+}
 
-export function SubtitlePanel() {
-  const fontSize = CURRENT_FONT_SIZE;
-  const presetId = CURRENT_PRESET_ID;
-  const selectedPreset = PRESETS.find((preset) => preset.id === presetId) ?? PRESETS[0];
-  const progress = ((fontSize - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)) * 100;
+export function SubtitlePanel({
+  onEdit,
+  onFontSizePreview,
+  project,
+  readonly,
+}: SubtitlePanelProps) {
+  const [fontSizeDraft, setFontSizeDraft] = useState<number | null>(null);
+  const fontSizeDraftRef = useRef<number | null>(null);
+  const canWrite = !readonly;
+  const track = project.tracks.find((candidate) => candidate.kind === 'subtitle');
+
+  // 切到别的 rail 时面板卸载，清掉未提交的字号预览，避免预览停在草稿值上。
+  useEffect(() => {
+    return () => {
+      onFontSizePreview(null);
+    };
+  }, [onFontSizePreview]);
+
+  if (!track) {
+    return (
+      <div className="ed-panel ed-subtitle-panel">
+        <header className="ed-subtitle-header">
+          <div className="ed-subtitle-title-group">
+            <h2 className="ed-subtitle-title">字幕设置</h2>
+            <p className="ed-subtitle-description">调整当前字幕轨显示样式</p>
+          </div>
+        </header>
+        <p className="ed-subtitle-empty">当前工程没有字幕轨。</p>
+      </div>
+    );
+  }
+
+  const fontSize = fontSizeDraft ?? track.style.fontSize;
+  const progress =
+    ((fontSize - SUBTITLE_FONT_SIZE_MIN) / (SUBTITLE_FONT_SIZE_MAX - SUBTITLE_FONT_SIZE_MIN)) * 100;
+  const selectedPreset = PRESETS.find((preset) => preset.id === track.style.presetId) ?? PRESETS[0];
+
+  const selectPreset = (presetId: SubtitlePresetId) => {
+    if (!canWrite || presetId === track.style.presetId) {
+      return;
+    }
+
+    onEdit({ type: 'set-subtitle-style', presetId });
+  };
+
+  const toggleVisible = () => {
+    if (!canWrite) {
+      return;
+    }
+
+    onEdit({ type: 'set-subtitle-visible', visible: !track.visible });
+  };
+
+  const previewFontSize = (value: number) => {
+    if (!canWrite) {
+      return;
+    }
+
+    fontSizeDraftRef.current = value;
+    setFontSizeDraft(value);
+    onFontSizePreview(value);
+  };
+
+  const commitFontSize = () => {
+    const value = fontSizeDraftRef.current;
+    fontSizeDraftRef.current = null;
+    setFontSizeDraft(null);
+    onFontSizePreview(null);
+
+    if (!canWrite || value === null || value === track.style.fontSize) {
+      return;
+    }
+
+    onEdit({ type: 'set-subtitle-style', fontSize: value });
+  };
 
   return (
     <div className="ed-panel ed-subtitle-panel">
@@ -33,23 +110,25 @@ export function SubtitlePanel() {
         <div className="ed-subtitle-switch-row">
           <span className="ed-subtitle-switch-label">显示字幕</span>
           <button
-            className="ed-subtitle-switch is-on"
+            className={`ed-subtitle-switch${track.visible ? ' is-on' : ''}`}
             type="button"
             role="switch"
-            aria-checked
-            aria-label="显示字幕（后续版本开放）"
-            title="显示开关将在后续版本开放"
-            disabled
+            aria-checked={track.visible}
+            aria-label={track.visible ? '隐藏字幕' : '显示字幕'}
+            title={
+              !canWrite
+                ? '编辑器只读，暂不能修改字幕'
+                : track.visible
+                  ? '隐藏字幕（保留片段与样式）'
+                  : '显示字幕'
+            }
+            disabled={!canWrite}
+            onClick={toggleVisible}
           >
             <span className="ed-subtitle-switch-knob" />
           </button>
         </div>
       </header>
-
-      <p className="ed-panel-followup" role="note">
-        <span className="ed-followup-chip">后续</span>
-        本轮只读：显示开关、字号与样式写入将在后续版本开放。
-      </p>
 
       <div className="ed-subtitle-body">
         <section
@@ -67,13 +146,17 @@ export function SubtitlePanel() {
             <input
               className="ed-subtitle-slider"
               type="range"
-              min={FONT_SIZE_MIN}
-              max={FONT_SIZE_MAX}
+              min={SUBTITLE_FONT_SIZE_MIN}
+              max={SUBTITLE_FONT_SIZE_MAX}
               step={1}
               value={fontSize}
-              disabled
-              aria-label="字幕字号（后续版本开放）"
-              title="字幕字号调整将在后续版本开放"
+              disabled={!canWrite}
+              aria-label="字幕字号"
+              title={!canWrite ? '编辑器只读，暂不能修改字幕' : '拖动调整字幕字号'}
+              onBlur={commitFontSize}
+              onChange={(event) => previewFontSize(Number(event.target.value))}
+              onKeyUp={commitFontSize}
+              onPointerUp={commitFontSize}
               style={{ '--subtitle-progress': `${progress}%` } as CSSProperties}
             />
           </div>
@@ -91,23 +174,24 @@ export function SubtitlePanel() {
 
           <div className="ed-subtitle-presets" role="group" aria-label="字幕样式">
             {PRESETS.map((preset) => {
-              const active = preset.id === presetId;
+              const active = preset.id === track.style.presetId;
 
               return (
                 <button
                   key={preset.id}
                   className={`ed-subtitle-preset${active ? ' is-active' : ''}`}
                   type="button"
-                  disabled
+                  disabled={!canWrite}
                   aria-pressed={active}
-                  aria-label={`${preset.label}（后续版本开放）`}
-                  title="字幕样式写入将在后续版本开放"
+                  aria-label={preset.label}
+                  title={
+                    !canWrite ? '编辑器只读，暂不能修改字幕' : `应用「${preset.label}」到当前字幕轨`
+                  }
+                  onClick={() => selectPreset(preset.id)}
                   style={
                     {
                       '--preset-color': preset.color,
                       '--preset-outline': preset.outline,
-                      '--preset-bg': preset.tileBackground ?? '#111214',
-                      '--preset-border': preset.tileBorder ?? '#343841',
                     } as CSSProperties
                   }
                 >
@@ -119,14 +203,7 @@ export function SubtitlePanel() {
 
           <div className="ed-subtitle-preset-footer">
             <span className="ed-subtitle-preset-name">{selectedPreset?.label ?? '白字黑边'}</span>
-            <button
-              className="ed-subtitle-apply"
-              type="button"
-              disabled
-              title="应用到当前字幕轨将在后续版本开放"
-            >
-              应用到当前字幕轨
-            </button>
+            <span className="ed-subtitle-preset-scope">应用到当前字幕轨</span>
           </div>
         </section>
       </div>

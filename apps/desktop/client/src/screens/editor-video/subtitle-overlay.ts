@@ -88,6 +88,8 @@ export function findActiveSubtitleClip(
 export function resolveSubtitleOverlay(
   project: VideoProject,
   timelineSeconds: number,
+  /** 面板拖动字号时的未提交值；传 null 时读工程里的已保存字号。 */
+  fontSizeOverride: number | null = null,
 ): SubtitleOverlay | null {
   const track = findSubtitleTrack(project);
 
@@ -102,7 +104,7 @@ export function resolveSubtitleOverlay(
   }
 
   const preset = subtitlePresetStyle(track.style.presetId);
-  const fontSize = clampSubtitleFontSize(track.style.fontSize);
+  const fontSize = clampSubtitleFontSize(fontSizeOverride ?? track.style.fontSize);
 
   return {
     clipId: clip.id,

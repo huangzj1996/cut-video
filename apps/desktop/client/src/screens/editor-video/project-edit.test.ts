@@ -1254,3 +1254,100 @@ describe('applyEdit music library', () => {
     );
   });
 });
+
+describe('applyEdit subtitle style and visibility', () => {
+  function subtitleTrack(project: VideoProject) {
+    return project.tracks.find((track) => track.kind === 'subtitle');
+  }
+
+  it('updates the whole-track subtitle style without touching clips', () => {
+    const project = createEditingProject();
+    const before = subtitleTrack(project);
+    const result = expectOk(
+      edit(project, { type: 'set-subtitle-style', presetId: 'yellow', fontSize: 56 }),
+    );
+    const track = subtitleTrack(result.project);
+
+    expect(result.changed).toBe(true);
+    expect(track?.style).toEqual({ fontSize: 56, presetId: 'yellow' });
+    expect(track?.clips).toEqual(before?.clips);
+    expect(findInvariantViolations(result.project)).toEqual([]);
+  });
+
+  it('only changes the fields that were passed', () => {
+    const project = createEditingProject();
+    const before = subtitleTrack(project);
+    const afterPreset = expectOk(
+      edit(project, { type: 'set-subtitle-style', presetId: 'blue' }),
+    ).project;
+    const afterSize = expectOk(
+      edit(afterPreset, { type: 'set-subtitle-style', fontSize: 64 }),
+    ).project;
+
+    expect(subtitleTrack(afterSize)?.style).toEqual({
+      fontSize: 64,
+      presetId: 'blue',
+    });
+    expect(subtitleTrack(afterSize)?.clips).toEqual(before?.clips);
+  });
+
+  it('reports changed=false when no style field is passed', () => {
+    const project = createEditingProject();
+    const result = edit(project, { type: 'set-subtitle-style' });
+
+    expect(expectOk(result).changed).toBe(false);
+  });
+
+  it('rejects invalid preset ids and font sizes without changing the document', () => {
+    const project = createEditingProject();
+
+    expectRejected(
+      edit(project, { type: 'set-subtitle-style', fontSize: 23 }),
+      'EDIT_SUBTITLE_STYLE_INVALID',
+    );
+    expectRejected(
+      edit(project, { type: 'set-subtitle-style', fontSize: 73 }),
+      'EDIT_SUBTITLE_STYLE_INVALID',
+    );
+    expectRejected(
+      edit(project, { type: 'set-subtitle-style', fontSize: 42.5 }),
+      'EDIT_SUBTITLE_STYLE_INVALID',
+    );
+    expectRejected(
+      edit(project, { type: 'set-subtitle-style', presetId: 'not-a-preset' as never }),
+      'EDIT_SUBTITLE_STYLE_INVALID',
+    );
+  });
+
+  it('toggles subtitle visibility without dropping clips or style', () => {
+    const project = createEditingProject();
+    const before = subtitleTrack(project);
+    const hidden = expectOk(edit(project, { type: 'set-subtitle-visible', visible: false }));
+
+    expect(subtitleTrack(hidden.project)?.visible).toBe(false);
+    expect(subtitleTrack(hidden.project)?.clips).toEqual(before?.clips);
+    expect(subtitleTrack(hidden.project)?.style).toEqual(before?.style);
+
+    const shown = expectOk(edit(hidden.project, { type: 'set-subtitle-visible', visible: true }));
+
+    expect(subtitleTrack(shown.project)?.visible).toBe(true);
+    expect(findInvariantViolations(shown.project)).toEqual([]);
+  });
+
+  it('rejects subtitle edits when the project has no subtitle track', () => {
+    const project = createEditingProject();
+    const withoutSubtitles: VideoProject = {
+      ...project,
+      tracks: project.tracks.filter((track) => track.kind !== 'subtitle'),
+    };
+
+    expectRejected(
+      edit(withoutSubtitles, { type: 'set-subtitle-style', fontSize: 48 }),
+      'EDIT_SUBTITLE_TRACK_MISSING',
+    );
+    expectRejected(
+      edit(withoutSubtitles, { type: 'set-subtitle-visible', visible: false }),
+      'EDIT_SUBTITLE_TRACK_MISSING',
+    );
+  });
+});

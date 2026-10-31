@@ -8,8 +8,6 @@ export interface SubtitlePresetStyle {
   color: string;
   label: string;
   outline: string;
-  tileBackground?: string;
-  tileBorder?: string;
 }
 
 export const SUBTITLE_PRESET_STYLES: Record<SubtitlePresetId, SubtitlePresetStyle> = {
@@ -22,8 +20,6 @@ export const SUBTITLE_PRESET_STYLES: Record<SubtitlePresetId, SubtitlePresetStyl
     color: '#f5f7fa',
     label: '经典白字',
     outline: '#35373c',
-    tileBackground: '#3a3b3e',
-    tileBorder: '#4a4c52',
   },
   yellow: {
     color: '#ffd400',

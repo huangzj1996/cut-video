@@ -22,6 +22,7 @@ import {
   type EditorSessionState,
 } from './editor-video/editor-session';
 import { describeReadonlyBanner, describeSaveStatus } from './editor-video/editor-status';
+import { resolveExportSaveGate } from './editor-video/export-save';
 import { EditorEmpty, EditorLoading, EditorUnavailable } from './editor-video/EditorStates';
 import { ExportDialog } from './editor-video/ExportDialog';
 import {
@@ -313,6 +314,7 @@ function EditorWorkspace({
   const sessionRef = useRef<EditorSessionState>(session);
   const autosaveRef = useRef<AutosaveController | null>(null);
   const savedRevisionRef = useRef(project.project.contentRevision);
+  const saveConflictRef = useRef(false);
   const editSeqRef = useRef(session.editSeq);
   const suppressClickRef = useRef(false);
   const trimRef = useRef<{
@@ -474,10 +476,12 @@ function EditorWorkspace({
 
       sessionDispatch({ project: response.data, savedSeq: current.editSeq, type: 'save-success' });
       savedRevisionRef.current = response.data.project.contentRevision;
+      saveConflictRef.current = false;
       return;
     }
 
     if (response.error.code === 'PROJECT_STALE_REVISION') {
+      saveConflictRef.current = true;
       sessionDispatch({ type: 'save-conflict' });
       autosaveRef.current?.stop();
       return;
@@ -632,11 +636,17 @@ function EditorWorkspace({
 
     await controller?.flush();
 
-    if (controller?.hasUnsavedEdits) {
-      throw new Error('自动保存失败，导出已阻止。');
+    const gate = resolveExportSaveGate({
+      conflict: saveConflictRef.current,
+      hasUnsavedEdits: controller?.hasUnsavedEdits ?? false,
+      savedRevision: savedRevisionRef.current,
+    });
+
+    if (!gate.ok) {
+      throw new Error(gate.message);
     }
 
-    return savedRevisionRef.current;
+    return gate.revision;
   }, []);
 
   const reloadProject = useCallback(async () => {
@@ -655,6 +665,7 @@ function EditorWorkspace({
 
     sessionDispatch({ project: response.data, type: 'reload' });
     savedRevisionRef.current = response.data.project.contentRevision;
+    saveConflictRef.current = false;
     autosaveRef.current?.resume();
     notify('已重新加载最新工程。');
   }, [notify]);

@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from 'react';
-import type { ExportIssue } from '../../../../shared/ipc-contract';
+import { EXPORT_OUTPUT_SPEC, type ExportIssue } from '../../../../shared/ipc-contract';
 import {
   createExportDialogState,
   exportDialogReducer,
@@ -16,10 +16,23 @@ interface ExportDialogProps {
   projectId: string;
 }
 
+// 输出规格与计划编译器共用同一份常量，避免弹窗与成片参数不一致。
 const OUTPUT_SPECS = [
-  { label: '容器', value: 'MP4' },
-  { label: '画面', value: '1920×1080 · 30fps' },
-  { label: '视频编码', value: 'H.264' },
+  { label: '容器', value: EXPORT_OUTPUT_SPEC.container.toUpperCase() },
+  {
+    label: '画面',
+    value:
+      EXPORT_OUTPUT_SPEC.width +
+      '×' +
+      EXPORT_OUTPUT_SPEC.height +
+      ' · ' +
+      EXPORT_OUTPUT_SPEC.fps +
+      'fps',
+  },
+  {
+    label: '视频编码',
+    value: EXPORT_OUTPUT_SPEC.videoCodec === 'h264' ? 'H.264' : EXPORT_OUTPUT_SPEC.videoCodec,
+  },
   { label: '音轨', value: '本版本不渲染音频' },
 ] as const;
 
@@ -30,6 +43,7 @@ function issuesFromDetails(details: unknown): ExportIssue[] | undefined {
 
   const issues = (details as { issues?: unknown }).issues;
 
+  // IPC details 是跨进程边界；只确认它确实是数组，元素形状由主进程契约保证。
   return Array.isArray(issues) ? (issues as ExportIssue[]) : undefined;
 }
 
@@ -289,7 +303,12 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             {error ? <ExportErrorBlock error={error} /> : null}
 
             <div className="ed-export-actions">
-              <button className="ed-export-secondary" onClick={onClose} type="button">
+              <button
+                className="ed-export-secondary"
+                disabled={state.busy}
+                onClick={onClose}
+                type="button"
+              >
                 取消
               </button>
               <button

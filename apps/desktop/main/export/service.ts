@@ -12,6 +12,7 @@ import type {
   ExportState,
 } from '../../shared/ipc-contract';
 import { IpcError } from '../ipc-error';
+import { assertProjectId } from '../ipc-args';
 import type { ProjectStore } from '../projects/project-store';
 import { runExportJob } from './job';
 import { compileExportPlan, ExportPlanError, type ExportPlan } from './plan';
@@ -49,16 +50,6 @@ interface ExecuteExportInput {
   runId: string;
   startedAt: number;
   targetPath: string;
-}
-
-const PROJECT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-
-function assertProjectId(value: unknown): string {
-  if (typeof value !== 'string' || !PROJECT_ID_PATTERN.test(value)) {
-    throw new IpcError('IPC_INVALID_ARGUMENT', '项目 ID 无效。');
-  }
-
-  return value;
 }
 
 /**

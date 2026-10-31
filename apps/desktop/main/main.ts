@@ -34,6 +34,7 @@ import { ChatStore } from './chat/chat-store';
 import { CloseFlushCoordinator } from './editor/close-flush';
 import { ExportService } from './export/service';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
+import { assertProjectId } from './ipc-args';
 import { registerAssetProtocol, registerAssetScheme } from './media/asset-protocol-handler';
 import { planAudioSourceRead } from './media/audio-source';
 import { isBinaryAvailable } from './media/binary-check';
@@ -272,14 +273,6 @@ function getExportService(): ExportService {
   });
 
   return exportService;
-}
-
-function assertProjectId(value: unknown): string {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
-    throw new IpcError('PROJECT_INVALID_ARGUMENT', '项目 ID 无效。');
-  }
-
-  return value;
 }
 
 function assertRunId(value: unknown): string {

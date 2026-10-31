@@ -60,15 +60,15 @@ export interface MediaReadAudioResult {
 }
 
 /**
- * 应用内置本地音乐库的曲目。不可用条目也会返回，让 UI 能逐条禁用并给出原因，
- * 而不是整库失败；`durationMs` 不可用时为 null。
- */
-/**
  * 导出（T19）的公开契约。
  */
 export type ExportPhase =
   'preparing' | 'validating' | 'mixing' | 'rendering' | 'verifying' | 'committing';
 
+/**
+ * EXPORT_* 错误码骨架：本切片产生运行中、只读/草稿、修订过期、校验失败、
+ * 目标不可写与渲染失败；其余留给音频、字幕、取消与同步自检切片。
+ */
 export type ExportErrorCode =
   | 'EXPORT_ALREADY_RUNNING'
   | 'EXPORT_PROJECT_READONLY_OR_DRAFT'
@@ -81,6 +81,15 @@ export type ExportErrorCode =
   | 'EXPORT_RENDER_FAILED'
   | 'EXPORT_SYNC_CHECK_FAILED'
   | 'EXPORT_CANCELLED';
+
+/** 固定的输出规格；计划编译器与导出弹窗共用同一份数值，避免两处漂移。 */
+export const EXPORT_OUTPUT_SPEC = {
+  container: 'mp4',
+  fps: 30,
+  height: 1080,
+  videoCodec: 'h264',
+  width: 1920,
+} as const;
 
 export interface ExportIssue {
   assetId?: string;
@@ -139,6 +148,10 @@ export interface ExportTargetSelection {
   path: string | null;
 }
 
+/**
+ * 应用内置本地音乐库的曲目。不可用条目也会返回，让 UI 能逐条禁用并给出原因，
+ * 而不是整库失败；`durationMs` 不可用时为 null。
+ */
 export interface MusicLibraryTrack {
   available: boolean;
   description?: string;

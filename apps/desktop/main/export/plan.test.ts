@@ -93,6 +93,39 @@ describe('export plan compiler', () => {
     ).toThrow(ExportPlanError);
   });
 
+  it('quantizes non-frame-aligned clip boundaries to output frames', () => {
+    const project = createExportFixture();
+    const videoTrack = project.tracks.find((track) => track.kind === 'video');
+
+    if (!videoTrack || videoTrack.kind !== 'video') {
+      throw new Error('fixture missing video track');
+    }
+
+    const first = videoTrack.clips[0];
+    const second = videoTrack.clips[1];
+
+    if (!first || !second) {
+      throw new Error('fixture missing clips');
+    }
+
+    project.scenes[0] = { ...project.scenes[0]!, durationMs: 1_005 };
+    project.scenes[1] = { ...project.scenes[1]!, durationMs: 1_005 };
+    videoTrack.clips[0] = { ...first, endMs: 1_005 };
+    videoTrack.clips[1] = { ...second, endMs: 2_010, startMs: 1_005 };
+
+    const plan = compileExportPlan({
+      ffmpegPath: 'ffmpeg',
+      project,
+      targetPath: 'C:\\out.mp4',
+    });
+    const graph = filterGraph(plan.ffmpeg.args);
+
+    expect(plan.expected.durationMs).toBe(2_000);
+    expect(plan.expected.frameCount).toBe(60);
+    expect(graph.match(/trim=end_frame=30/g)).toHaveLength(2);
+    expect(plan.ffmpeg.args[plan.ffmpeg.args.indexOf('-t') + 1]).toBe('2.000');
+  });
+
   it('rejects a project without a video track', () => {
     const project = createExportFixture();
     project.tracks = project.tracks.filter((track) => track.kind !== 'video');

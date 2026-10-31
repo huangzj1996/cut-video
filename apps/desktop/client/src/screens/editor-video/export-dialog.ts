@@ -1,14 +1,14 @@
 import type {
-  ExportErrorCode,
   ExportIssue,
   ExportPhase,
   ExportState,
+  IpcErrorCode,
 } from '../../../../shared/ipc-contract';
 
 export type ExportDialogStep = 'failed' | 'prepare' | 'running' | 'succeeded';
 
 export interface ExportDialogError {
-  code?: ExportErrorCode | string;
+  code?: IpcErrorCode;
   issues?: ExportIssue[];
   message: string;
 }

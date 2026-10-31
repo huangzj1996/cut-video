@@ -1,10 +1,10 @@
 import type { VideoAsset, VideoClip, VideoProject } from '@miaoma/video-project';
-import type { ExportErrorCode } from '../../shared/ipc-contract';
+import { EXPORT_OUTPUT_SPEC, type ExportErrorCode } from '../../shared/ipc-contract';
 import { partialPathFor } from './target';
 
-export const OUTPUT_WIDTH = 1920;
-export const OUTPUT_HEIGHT = 1080;
-export const OUTPUT_FPS = 30;
+export const OUTPUT_WIDTH = EXPORT_OUTPUT_SPEC.width;
+export const OUTPUT_HEIGHT = EXPORT_OUTPUT_SPEC.height;
+export const OUTPUT_FPS = EXPORT_OUTPUT_SPEC.fps;
 
 const OUTPUT_CRF = 20;
 const OUTPUT_PRESET = 'medium';
@@ -198,7 +198,7 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
     '-t',
     durationSeconds,
     '-f',
-    'mp4',
+    EXPORT_OUTPUT_SPEC.container,
     '-movflags',
     '+faststart',
     temporaryPath,
@@ -206,12 +206,12 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
 
   return {
     expected: {
-      container: 'mp4',
+      container: EXPORT_OUTPUT_SPEC.container,
       durationMs: Math.round((totalFrameCount / OUTPUT_FPS) * 1000),
       frameCount: totalFrameCount,
       fps: OUTPUT_FPS,
       height: OUTPUT_HEIGHT,
-      videoCodec: 'h264',
+      videoCodec: EXPORT_OUTPUT_SPEC.videoCodec,
       width: OUTPUT_WIDTH,
     },
     ffmpeg: { args, command: ffmpegPath },

@@ -4,7 +4,7 @@ import { SUBTITLE_PRESET_IDS } from '@miaoma/video-project';
 import type { SubtitlePresetId, VideoProject } from '@miaoma/video-project';
 import type { EditAction } from '../editor-video/project-edit';
 import { SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN } from '../editor-video/subtitle-overlay';
-import { SUBTITLE_PRESET_STYLES } from '../subtitle-presets';
+import { SUBTITLE_PRESET_STYLES } from '../../../../shared/subtitle-presets';
 import './subtitle-panel.css';
 
 /**

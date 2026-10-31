@@ -1,8 +1,8 @@
 import type { SubtitlePresetId } from '@miaoma/video-project';
 
 /**
- * 字幕样式预设的展示定义：字幕面板的样式卡与预览叠层共用同一份颜色/描边，
- * 避免两处各写一套后悄悄漂移（后续导出映射 ASS 也以这里为准）。
+ * 字幕样式预设的唯一来源：字幕面板的样式卡、预览叠层与导出 ASS 都读这一份，
+ * 避免渲染进程与主进程各写一套颜色/描边后悄悄漂移。
  */
 export interface SubtitlePresetStyle {
   color: string;

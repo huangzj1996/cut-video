@@ -1,4 +1,13 @@
-import { existsSync, renameSync, rmSync, statSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
 import type { ExportErrorInfo, ExportPhase } from '../../shared/ipc-contract';
 import type { ExportPlan } from './plan';
 import type { ExportProcessRunner } from './runner';
@@ -20,6 +29,14 @@ function removeQuietly(filePath: string): void {
   }
 }
 
+function removeDirectoryQuietly(directory: string): void {
+  try {
+    rmSync(directory, { force: true, maxRetries: 3, recursive: true });
+  } catch {
+    // 同上：临时字体目录清理失败只影响磁盘，不影响导出结果。
+  }
+}
+
 function fileSize(filePath: string): number {
   try {
     return existsSync(filePath) ? statSync(filePath).size : 0;
@@ -34,8 +51,46 @@ function failure(message: string): ExportJobResult {
 }
 
 /**
+ * 把 ASS 与随包字体写到目标目录，供 ffmpeg 以相对 ASCII 路径烧录。
+ * 字体文件缺失/不可复制时报 EXPORT_FONT_MISSING，而不是让 ffmpeg 悄悄用错字体。
+ */
+function prepareSubtitleArtifacts(plan: ExportPlan): ExportErrorInfo | null {
+  if (!plan.subtitles) {
+    return null;
+  }
+
+  try {
+    writeFileSync(plan.subtitles.assPath, plan.subtitles.assText, 'utf8');
+  } catch {
+    return { code: 'EXPORT_RENDER_FAILED', message: '无法写入字幕临时文件，导出未开始。' };
+  }
+
+  try {
+    mkdirSync(plan.subtitles.fontsDirPath, { recursive: true });
+
+    for (const fontFile of plan.subtitles.fontFiles) {
+      copyFileSync(fontFile, path.join(plan.subtitles.fontsDirPath, path.basename(fontFile)));
+    }
+  } catch {
+    return { code: 'EXPORT_FONT_MISSING', message: '无法准备随包字幕字体，导出未开始。' };
+  }
+
+  return null;
+}
+
+/** 字幕属于临时产物：无论成功、失败还是取消都要清掉。 */
+function cleanupSubtitleArtifacts(plan: ExportPlan): void {
+  if (!plan.subtitles) {
+    return;
+  }
+
+  removeQuietly(plan.subtitles.assPath);
+  removeDirectoryQuietly(plan.subtitles.fontsDirPath);
+}
+
+/**
  * 执行一次两段式导出：先预混音轨，再单遍视频编码并封装，成功且产物有效才提交。
- * 预混音轨与临时成品都是临时产物：成功、失败、取消都要清理；
+ * 预混音轨、临时成品与字幕/字体产物都是临时产物：成功、失败、取消都要清理；
  * 任何失败都不提交，保证“成功”只有一种含义。
  */
 export async function runExportJob(options: ExportJobOptions): Promise<ExportJobResult> {
@@ -46,11 +101,18 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
   removeQuietly(plan.premixTemporaryPath);
 
   try {
+    const prepareError = prepareSubtitleArtifacts(plan);
+
+    if (prepareError) {
+      return { error: prepareError, ok: false };
+    }
+
     options.onPhase?.('mixing');
 
     const premixResult = await runner({
       args: plan.premix.args,
       command: plan.premix.command,
+      cwd: plan.cwd,
     });
 
     if (premixResult.spawnError || premixResult.exitCode !== 0) {
@@ -66,6 +128,7 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
     const processResult = await runner({
       args: plan.render.args,
       command: plan.render.command,
+      cwd: plan.cwd,
     });
 
     if (processResult.spawnError || processResult.exitCode !== 0) {
@@ -87,8 +150,9 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
     committed = true;
     return { ok: true, outputPath: plan.targetPath };
   } finally {
-    // 预混音轨无论成败都要清理；未提交的临时成品同理。
+    // 预混音轨与字幕/字体无论成败都要清理；未提交的临时成品同理。
     removeQuietly(plan.premixTemporaryPath);
+    cleanupSubtitleArtifacts(plan);
 
     if (!committed) {
       removeQuietly(plan.temporaryPath);

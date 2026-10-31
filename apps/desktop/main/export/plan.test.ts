@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { MusicTrack, VideoProject } from '@miaoma/video-project';
 import {
@@ -9,7 +10,7 @@ import {
   OUTPUT_SAMPLE_RATE,
   OUTPUT_WIDTH,
 } from './plan';
-import { createExportFixture } from './test-support/fixture';
+import { createExportFixture, EXPORT_TEST_FONTS } from './test-support/fixture';
 
 function filterGraph(args: string[]): string {
   const index = args.indexOf('-filter_complex');
@@ -38,7 +39,9 @@ function musicTrack(project: VideoProject): MusicTrack {
 describe('export plan compiler', () => {
   it('compiles 1920x1080 30fps H.264/AAC 192k arguments with a premixed audio track', () => {
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project: createExportFixture(),
       targetPath: 'C:\\导出\\成片.mp4',
     });
@@ -55,6 +58,8 @@ describe('export plan compiler', () => {
       videoCodec: 'h264',
       width: OUTPUT_WIDTH,
     });
+    expect(plan.cwd).toBe('C:\\导出');
+    expect(plan.subtitles).toBeNull();
     expect(plan.temporaryPath).toBe('C:\\导出\\成片.mp4.partial');
     expect(plan.premixTemporaryPath).toBe('C:\\导出\\成片.mp4.partial.wav');
     expect(plan.render.command).toBe('ffmpeg');
@@ -74,13 +79,16 @@ describe('export plan compiler', () => {
     expect(graph).toContain('concat=n=2:v=1:a=0');
     expect(graph).toContain('trim=end_frame=30');
     expect(graph).toContain('[vout]');
+    expect(graph).not.toContain('ass=');
     expect(graph).not.toContain('导出');
     expect(graph).not.toContain('C:\\');
   });
 
   it('maps the premixed audio input after the video inputs and never the source audio', () => {
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project: createExportFixture(),
       targetPath: 'C:\\out.mp4',
     });
@@ -94,7 +102,9 @@ describe('export plan compiler', () => {
 
   it('mixes voice clips by clip volume, speed and timeline start', () => {
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project: createExportFixture({ voiceSpeed: 1.5, voiceVolume: 0.4 }),
       targetPath: 'C:\\out.mp4',
     });
@@ -116,7 +126,9 @@ describe('export plan compiler', () => {
 
   it('loops a trimmed music window and mixes voice plus music with gain compensation', () => {
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project: createExportFixture({
         musicLoop: true,
         musicPath: 'C:/media/music.mp3',
@@ -138,7 +150,9 @@ describe('export plan compiler', () => {
 
   it('does not loop music when loop is off and pads the silent tail', () => {
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project: createExportFixture({
         musicLoop: false,
         musicPath: 'C:/media/music.mp3',
@@ -159,7 +173,13 @@ describe('export plan compiler', () => {
       track.kind === 'music' ? { ...track, visible: false } : track,
     );
 
-    const plan = compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' });
+    const plan = compileExportPlan({
+      artifactToken: 'run-1',
+      ffmpegPath: 'ffmpeg',
+      fonts: null,
+      project,
+      targetPath: 'C:\\out.mp4',
+    });
     const graph = filterGraph(plan.premix.args);
 
     expect(graph).not.toContain('musicbus');
@@ -171,7 +191,13 @@ describe('export plan compiler', () => {
     const project = createExportFixture();
     project.tracks = project.tracks.filter((track) => track.kind !== 'voice');
 
-    const plan = compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' });
+    const plan = compileExportPlan({
+      artifactToken: 'run-1',
+      ffmpegPath: 'ffmpeg',
+      fonts: null,
+      project,
+      targetPath: 'C:\\out.mp4',
+    });
     const graph = filterGraph(plan.premix.args);
 
     expect(graph).toContain(`anullsrc=r=${OUTPUT_SAMPLE_RATE}:cl=stereo`);
@@ -191,13 +217,21 @@ describe('export plan compiler', () => {
     music.endMs = 2_500;
 
     expect(() =>
-      compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' }),
+      compileExportPlan({
+        artifactToken: 'run-1',
+        ffmpegPath: 'ffmpeg',
+        fonts: null,
+        project,
+        targetPath: 'C:\\out.mp4',
+      }),
     ).toThrow(ExportPlanError);
   });
 
   it('applies clip speed to the source timestamps', () => {
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project: createExportFixture({ speed: 2 }),
       targetPath: 'C:\\out.mp4',
     });
@@ -207,7 +241,9 @@ describe('export plan compiler', () => {
 
   it('loops image assets instead of trimming a single frame', () => {
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project: createExportFixture({ firstMediaType: 'image' }),
       targetPath: 'C:\\out.mp4',
     });
@@ -234,7 +270,13 @@ describe('export plan compiler', () => {
     videoTrack.clips[1] = { ...second, endMs: 2_100, startMs: 1_100 };
 
     expect(() =>
-      compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' }),
+      compileExportPlan({
+        artifactToken: 'run-1',
+        ffmpegPath: 'ffmpeg',
+        fonts: null,
+        project,
+        targetPath: 'C:\\out.mp4',
+      }),
     ).toThrow(ExportPlanError);
   });
 
@@ -259,7 +301,9 @@ describe('export plan compiler', () => {
     videoTrack.clips[1] = { ...second, endMs: 2_010, startMs: 1_005 };
 
     const plan = compileExportPlan({
+      artifactToken: 'run-1',
       ffmpegPath: 'ffmpeg',
+      fonts: null,
       project,
       targetPath: 'C:\\out.mp4',
     });
@@ -276,7 +320,66 @@ describe('export plan compiler', () => {
     project.tracks = project.tracks.filter((track) => track.kind !== 'video');
 
     expect(() =>
-      compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' }),
+      compileExportPlan({
+        artifactToken: 'run-1',
+        ffmpegPath: 'ffmpeg',
+        fonts: null,
+        project,
+        targetPath: 'C:\\out.mp4',
+      }),
+    ).toThrow(ExportPlanError);
+  });
+});
+
+describe('export plan subtitle burn-in', () => {
+  it('burns subtitles with relative ASCII paths and a target-directory cwd', () => {
+    const plan = compileExportPlan({
+      artifactToken: 'run-1',
+      ffmpegPath: 'ffmpeg',
+      fonts: EXPORT_TEST_FONTS,
+      project: createExportFixture({ subtitle: { fontSize: 48, presetId: 'white-outline' } }),
+      targetPath: 'D:\\导出 目录\\成片.mp4',
+    });
+    const graph = filterGraph(plan.render.args);
+
+    expect(graph).toContain(
+      'ass=filename=.miaoma-export-run-1.ass:fontsdir=.miaoma-export-run-1-fonts',
+    );
+    // 滤镜参数里不能出现中文绝对路径；目标目录用 cwd 传进去。
+    expect(graph).not.toContain('导出');
+    expect(graph).not.toContain('D:\\');
+    expect(plan.cwd).toBe('D:\\导出 目录');
+    expect(plan.subtitles).not.toBeNull();
+    expect(plan.subtitles?.assPath).toBe(path.join('D:\\导出 目录', '.miaoma-export-run-1.ass'));
+    expect(plan.subtitles?.fontsDirPath).toBe(
+      path.join('D:\\导出 目录', '.miaoma-export-run-1-fonts'),
+    );
+    expect(plan.subtitles?.fontFiles).toEqual(EXPORT_TEST_FONTS.files);
+    expect(plan.subtitles?.assText).toContain('Style: Default,Noto Sans SC,48');
+  });
+
+  it('skips the ass filter when the subtitle track is hidden', () => {
+    const plan = compileExportPlan({
+      artifactToken: 'run-1',
+      ffmpegPath: 'ffmpeg',
+      fonts: EXPORT_TEST_FONTS,
+      project: createExportFixture({ subtitle: { visible: false } }),
+      targetPath: 'C:\\out.mp4',
+    });
+
+    expect(plan.subtitles).toBeNull();
+    expect(filterGraph(plan.render.args)).not.toContain('ass=');
+  });
+
+  it('rejects subtitle burn-in without the bundled font', () => {
+    expect(() =>
+      compileExportPlan({
+        artifactToken: 'run-1',
+        ffmpegPath: 'ffmpeg',
+        fonts: null,
+        project: createExportFixture({ subtitle: {} }),
+        targetPath: 'C:\\out.mp4',
+      }),
     ).toThrow(ExportPlanError);
   });
 });

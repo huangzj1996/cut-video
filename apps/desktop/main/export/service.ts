@@ -14,6 +14,7 @@ import type {
 import { IpcError } from '../ipc-error';
 import { assertProjectId } from '../ipc-args';
 import type { ProjectStore } from '../projects/project-store';
+import type { ExportFonts } from './fonts';
 import { runExportJob } from './job';
 import { compileExportPlan, ExportPlanError, type ExportPlan } from './plan';
 import { validateExportPreflight, type ExportPreflightDeps } from './preflight';
@@ -27,6 +28,8 @@ export interface ExportServiceMedia {
 
 export interface ExportServiceOptions {
   createRunner?: () => ExportProcessRunner;
+  /** 随包字体；缺失时返回 null，前置校验据此报 EXPORT_FONT_MISSING。 */
+  getExportFonts: () => ExportFonts | null;
   getProjectStore: () => ProjectStore;
   getSettings: () => AppSettings;
   getWorkflowStatus: (projectId: string) => WorkflowRunStatus | null;
@@ -130,8 +133,9 @@ export class ExportService {
 
     const targetPath = assertExportTargetPath(input.targetPath);
     const media = this.options.media();
+    const fonts = this.options.getExportFonts();
     const preflightError = validateExportPreflight(
-      { ffmpegAvailable: media.ffmpegAvailable, project, targetPath },
+      { ffmpegAvailable: media.ffmpegAvailable, fonts, project, targetPath },
       {
         ...this.options.preflightDeps,
         now: this.options.preflightDeps?.now ?? (() => this.now()),
@@ -147,10 +151,17 @@ export class ExportService {
       );
     }
 
+    const runId = randomUUID();
     let plan: ExportPlan;
 
     try {
-      plan = compileExportPlan({ ffmpegPath: media.ffmpegPath, project, targetPath });
+      plan = compileExportPlan({
+        artifactToken: runId,
+        ffmpegPath: media.ffmpegPath,
+        fonts,
+        project,
+        targetPath,
+      });
     } catch (error) {
       if (error instanceof ExportPlanError) {
         throw new IpcError('EXPORT_VALIDATION_FAILED', error.message);
@@ -158,8 +169,6 @@ export class ExportService {
 
       throw error;
     }
-
-    const runId = randomUUID();
     const startedAt = Date.now();
 
     this.emitState({

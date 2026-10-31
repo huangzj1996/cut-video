@@ -11,7 +11,8 @@ const config: ForgeConfig = {
     executableName: 'miaoma-magicut',
     // FFmpeg/ffprobe 不提交仓库；打包前放入 resources/ffmpeg。
     // 内置本地音乐库同理：音频与清单不入库，打包时一起带入 resources/assets。
-    extraResource: ['./resources/ffmpeg', './resources/assets'],
+    // 字幕烧录所需的 Noto Sans SC 与 OFL 许可证随 fonts 目录一起分发。
+    extraResource: ['./resources/ffmpeg', './resources/assets', './resources/fonts'],
   },
   rebuildConfig: {},
   makers: [

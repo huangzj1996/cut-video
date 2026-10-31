@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type {
   MusicClip,
   MusicTrack,
@@ -8,6 +9,8 @@ import type {
   VoiceTrack,
 } from '@miaoma/video-project';
 import { EXPORT_OUTPUT_SPEC, type ExportErrorCode } from '../../shared/ipc-contract';
+import type { ExportFonts } from './fonts';
+import { buildSubtitleDocument, subtitleArtifactFileNames } from './subtitles';
 import { partialPathFor, premixPartialPathFor } from './target';
 
 export const OUTPUT_WIDTH = EXPORT_OUTPUT_SPEC.width;
@@ -58,7 +61,21 @@ export interface ExportFfmpegCommand {
   command: string;
 }
 
+/** 字幕烧录需要写进目标目录的临时产物；滤镜参数只引用其中的相对 ASCII 文件名。 */
+export interface ExportSubtitleArtifacts {
+  /** ASS 文件绝对路径。 */
+  assPath: string;
+  /** ASS 文档全文（UTF-8、不带 BOM）。 */
+  assText: string;
+  /** 临时字体目录绝对路径。 */
+  fontsDirPath: string;
+  /** 需要复制进临时字体目录的随包字体文件。 */
+  fontFiles: string[];
+}
+
 export interface ExportPlan {
+  /** 渲染进程工作目录：目标目录，让 ASS/fontsdir 以相对路径解析。 */
+  cwd: string;
   expected: ExportExpectedOutput;
   /** 第一段：把配音与音乐混成一条与时间线等长的预混音轨。 */
   premix: ExportFfmpegCommand;
@@ -66,12 +83,18 @@ export interface ExportPlan {
   premixTemporaryPath: string;
   /** 第二段：单遍视频编码并从预混音轨封装 AAC。 */
   render: ExportFfmpegCommand;
+  /** null 表示这次导出不烧录字幕。 */
+  subtitles: ExportSubtitleArtifacts | null;
   targetPath: string;
   temporaryPath: string;
 }
 
 export interface CompileExportPlanInput {
+  /** 每次导出的唯一标识，用于给临时 ASS/字体目录命名（只允许 ASCII）。 */
+  artifactToken: string;
   ffmpegPath: string;
+  /** 随包字体；缺失时传 null，由前置校验先报 EXPORT_FONT_MISSING。 */
+  fonts: ExportFonts | null;
   project: VideoProject;
   targetPath: string;
 }
@@ -366,6 +389,7 @@ function buildVideoCommand(input: {
   ffmpegPath: string;
   premixTemporaryPath: string;
   project: VideoProject;
+  subtitleFilter: string | null;
   temporaryPath: string;
   totalDurationMs: number;
 }): ExportFfmpegCommand {
@@ -374,6 +398,7 @@ function buildVideoCommand(input: {
     ffmpegPath,
     premixTemporaryPath,
     project,
+    subtitleFilter,
     temporaryPath,
     totalDurationMs,
   } = input;
@@ -424,15 +449,16 @@ function buildVideoCommand(input: {
     throw new ExportPlanError('视频轨未覆盖完整时间线，无法导出。');
   }
 
+  const postFilters = ['concat=n=' + clips.length + ':v=1:a=0'];
+
+  if (subtitleFilter) {
+    postFilters.push(subtitleFilter);
+  }
+
+  postFilters.push('format=' + PIXEL_FORMAT);
+
   const graph =
-    filterChains.join(';') +
-    ';' +
-    concatLabels.join('') +
-    'concat=n=' +
-    clips.length +
-    ':v=1:a=0,format=' +
-    PIXEL_FORMAT +
-    '[vout]';
+    filterChains.join(';') + ';' + concatLabels.join('') + postFilters.join(',') + '[vout]';
   // 源视频原声不映射：视频输入只取 :v，音频只来自预混音轨。
   const args = [
     '-y',
@@ -480,9 +506,10 @@ function buildVideoCommand(input: {
  * 导出计划编译器：把时间线换成两段可执行的 ffmpeg 参数与期望输出规格。
  *
  * 第一段把配音与音乐按片段音量/语速/循环混成一条与时间线等长的预混音轨，
- * 第二段单遍视频编码并从预混音轨封装 AAC 192kbps。源视频原声不参与映射。
- * 时间统一用整数毫秒，音频按 48kHz 样本数对齐，输出时长与片段边界按 30fps 量化。
- * 纯函数：不读磁盘、不启动进程。
+ * 第二段单遍视频编码并从预混音轨封装 AAC 192kbps，字幕轨可见时在拼接后用
+ * ass 滤镜烧录（ASS/fontsdir 用相对 ASCII 文件名 + 进程 cwd，中文绝对路径实测失败）。
+ * 源视频原声不参与映射；时间统一用整数毫秒，音频按 48kHz 样本数对齐，
+ * 输出时长与片段边界按 30fps 量化。纯函数：不读磁盘、不启动进程。
  */
 export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
   const { project, targetPath, ffmpegPath } = input;
@@ -515,8 +542,30 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
     'wav',
     premixTemporaryPath,
   ];
+  const cwd = path.dirname(targetPath);
+  const subtitleDocument = buildSubtitleDocument(project);
+  const artifactNames = subtitleDocument ? subtitleArtifactFileNames(input.artifactToken) : null;
+
+  if (subtitleDocument && !input.fonts) {
+    throw new ExportPlanError('缺少随包中文字体，无法烧录字幕。');
+  }
+
+  const subtitles: ExportSubtitleArtifacts | null =
+    subtitleDocument && artifactNames
+      ? {
+          assPath: path.join(cwd, artifactNames.assFileName),
+          assText: subtitleDocument,
+          fontsDirPath: path.join(cwd, artifactNames.fontsDirName),
+          fontFiles: input.fonts?.files.slice() ?? [],
+        }
+      : null;
+  const subtitleFilter =
+    artifactNames && subtitles
+      ? 'ass=filename=' + artifactNames.assFileName + ':fontsdir=' + artifactNames.fontsDirName
+      : null;
 
   return {
+    cwd,
     expected: {
       audioBitrateKbps: AUDIO_BITRATE_KBPS,
       audioCodec: AUDIO_CODEC,
@@ -535,9 +584,11 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
       ffmpegPath,
       premixTemporaryPath,
       project,
+      subtitleFilter,
       temporaryPath,
       totalDurationMs,
     }),
+    subtitles,
     targetPath,
     temporaryPath,
   };

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ValidationReport } from '@miaoma/video-project';
 import { validateExportPreflight } from './preflight';
-import { createExportFixture } from './test-support/fixture';
+import { createExportFixture, EXPORT_TEST_FONTS } from './test-support/fixture';
 
 const roots: string[] = [];
 
@@ -38,7 +38,12 @@ describe('export preflight', () => {
     const root = tempRoot();
     const targetPath = path.join(root, '成片.mp4');
     const error = validateExportPreflight(
-      { ffmpegAvailable: true, project: createExportFixture(), targetPath },
+      {
+        ffmpegAvailable: true,
+        fonts: EXPORT_TEST_FONTS,
+        project: createExportFixture(),
+        targetPath,
+      },
       { validate: () => report(true) },
     );
 
@@ -50,6 +55,7 @@ describe('export preflight', () => {
     const error = validateExportPreflight(
       {
         ffmpegAvailable: false,
+        fonts: EXPORT_TEST_FONTS,
         project: createExportFixture(),
         targetPath: path.join(root, '成片.mp4'),
       },
@@ -59,11 +65,27 @@ describe('export preflight', () => {
     expect(error?.code).toBe('EXPORT_RENDER_FAILED');
   });
 
+  it('blocks export when the bundled subtitle font is missing', () => {
+    const root = tempRoot();
+    const error = validateExportPreflight(
+      {
+        ffmpegAvailable: true,
+        fonts: null,
+        project: createExportFixture({ subtitle: {} }),
+        targetPath: path.join(root, '成片.mp4'),
+      },
+      { validate: () => report(true) },
+    );
+
+    expect(error?.code).toBe('EXPORT_FONT_MISSING');
+  });
+
   it('blocks export when the target directory does not exist', () => {
     const root = tempRoot();
     const error = validateExportPreflight(
       {
         ffmpegAvailable: true,
+        fonts: EXPORT_TEST_FONTS,
         project: createExportFixture(),
         targetPath: path.join(root, 'missing', '成片.mp4'),
       },
@@ -85,6 +107,7 @@ describe('export preflight', () => {
     const error = validateExportPreflight(
       {
         ffmpegAvailable: true,
+        fonts: EXPORT_TEST_FONTS,
         project: createExportFixture(),
         targetPath: path.join(root, '成片.mp4'),
       },
@@ -107,7 +130,12 @@ describe('export preflight', () => {
     const targetPath = path.join(root, '成片.mp4');
     mkdirSync(targetPath);
     const error = validateExportPreflight(
-      { ffmpegAvailable: true, project: createExportFixture(), targetPath },
+      {
+        ffmpegAvailable: true,
+        fonts: EXPORT_TEST_FONTS,
+        project: createExportFixture(),
+        targetPath,
+      },
       { validate: () => report(true) },
     );
 
@@ -129,6 +157,7 @@ describe('export preflight', () => {
     const project = createExportFixture({ audioPath: voice, videoPaths: [a, b] });
     const error = validateExportPreflight({
       ffmpegAvailable: true,
+      fonts: EXPORT_TEST_FONTS,
       project,
       targetPath: path.join(root, '成片.mp4'),
     });

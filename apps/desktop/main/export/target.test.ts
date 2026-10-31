@@ -5,6 +5,7 @@ import {
   buildDefaultExportTarget,
   formatExportTimestamp,
   partialPathFor,
+  premixPartialPathFor,
   sanitizeExportFileName,
 } from './target';
 
@@ -45,5 +46,6 @@ describe('export target helpers', () => {
 
   it('uses a .partial sibling for the temporary file', () => {
     expect(partialPathFor('C:/out/成片.mp4')).toBe('C:/out/成片.mp4.partial');
+    expect(premixPartialPathFor('C:/out/成片.mp4')).toBe('C:/out/成片.mp4.partial.wav');
   });
 });

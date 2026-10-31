@@ -1,12 +1,19 @@
-import type { VideoClip, VideoProject, VoiceClip } from '@miaoma/video-project';
+import type { MusicClip, VideoClip, VideoProject, VoiceClip } from '@miaoma/video-project';
 
 const ISO = '2026-01-01T00:00:00.000Z';
 
 export interface ExportFixtureOptions {
   audioPath?: string;
   firstMediaType?: 'image' | 'video';
+  musicLoop?: boolean;
+  musicPath?: string;
+  musicSourceEndMs?: number;
+  musicSourceStartMs?: number;
+  musicVolume?: number;
   speed?: number;
   videoPaths?: readonly [string, string];
+  voiceSpeed?: number;
+  voiceVolume?: number;
 }
 
 function videoClip(
@@ -32,7 +39,13 @@ function videoClip(
   };
 }
 
-function voiceClip(id: string, startMs: number, endMs: number, sceneId: string): VoiceClip {
+function voiceClip(
+  id: string,
+  startMs: number,
+  endMs: number,
+  sceneId: string,
+  options: { speed?: number; volume?: number } = {},
+): VoiceClip {
   return {
     assetId: 'voice-a',
     endMs,
@@ -41,6 +54,29 @@ function voiceClip(id: string, startMs: number, endMs: number, sceneId: string):
     sceneId,
     startMs,
     voicePreset: 'wenrou-xuejie',
+    ...(options.speed !== undefined ? { speed: options.speed } : {}),
+    ...(options.volume !== undefined ? { volume: options.volume } : {}),
+  };
+}
+
+function musicClip(
+  id: string,
+  startMs: number,
+  endMs: number,
+  sceneId: string,
+  options: { loop: boolean; sourceEndMs: number; sourceStartMs: number; volume: number },
+): MusicClip {
+  return {
+    assetId: 'music-a',
+    endMs,
+    id,
+    kind: 'music',
+    loop: options.loop,
+    sceneId,
+    sourceEndMs: options.sourceEndMs,
+    sourceStartMs: options.sourceStartMs,
+    startMs,
+    volume: options.volume,
   };
 }
 
@@ -49,6 +85,7 @@ export function createExportFixture(options: ExportFixtureOptions = {}): VideoPr
   const [firstPath, secondPath] = options.videoPaths ?? ['C:/media/a.mp4', 'C:/media/b.mp4'];
   const audioPath = options.audioPath ?? 'C:/media/voice.m4a';
   const firstType = options.firstMediaType ?? 'video';
+  const musicPath = options.musicPath;
 
   return {
     ai: {
@@ -61,7 +98,9 @@ export function createExportFixture(options: ExportFixtureOptions = {}): VideoPr
       startedAt: ISO,
     },
     assets: {
-      music: [],
+      music: musicPath
+        ? [{ durationMs: 5_000, id: 'music-a', path: musicPath, title: '夹具音乐' }]
+        : [],
       subtitles: [],
       thumbnails: [],
       videos: [
@@ -153,12 +192,35 @@ export function createExportFixture(options: ExportFixtureOptions = {}): VideoPr
       },
       {
         clips: [
-          voiceClip('voice-1', 0, 1_000, 'scene-1'),
-          voiceClip('voice-2', 1_000, 2_000, 'scene-2'),
+          voiceClip('voice-1', 0, 1_000, 'scene-1', {
+            speed: options.voiceSpeed,
+            volume: options.voiceVolume,
+          }),
+          voiceClip('voice-2', 1_000, 2_000, 'scene-2', {
+            speed: options.voiceSpeed,
+            volume: options.voiceVolume,
+          }),
         ],
         id: 'track-voice',
         kind: 'voice',
       },
+      ...(musicPath
+        ? [
+            {
+              clips: [
+                musicClip('music-1', 0, 2_000, 'scene-1', {
+                  loop: options.musicLoop ?? false,
+                  sourceEndMs: options.musicSourceEndMs ?? 2_000,
+                  sourceStartMs: options.musicSourceStartMs ?? 0,
+                  volume: options.musicVolume ?? 0.35,
+                }),
+              ],
+              id: 'track-music',
+              kind: 'music' as const,
+              visible: true,
+            },
+          ]
+        : []),
     ],
   };
 }

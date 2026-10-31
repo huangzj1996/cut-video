@@ -105,11 +105,17 @@ describe('export service', () => {
     expect(states.map((state) => state.status + ':' + state.phase)).toEqual([
       'running:preparing',
       'running:validating',
+      'running:mixing',
       'running:rendering',
       'running:committing',
       'succeeded:committing',
     ]);
-    expect(progress.map((event) => event.phase)).toEqual(['validating', 'rendering', 'committing']);
+    expect(progress.map((event) => event.phase)).toEqual([
+      'validating',
+      'mixing',
+      'rendering',
+      'committing',
+    ]);
     expect(existsSync(targetPath())).toBe(true);
     expect(service.getOutputPath(result.runId)).toBe(targetPath());
   });

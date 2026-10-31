@@ -84,6 +84,8 @@ export type ExportErrorCode =
 
 /** 固定的输出规格；计划编译器与导出弹窗共用同一份数值，避免两处漂移。 */
 export const EXPORT_OUTPUT_SPEC = {
+  audioBitrateKbps: 192,
+  audioCodec: 'aac',
   container: 'mp4',
   fps: 30,
   height: 1080,

@@ -75,6 +75,11 @@ export function partialPathFor(targetPath: string): string {
   return `${targetPath}.partial`;
 }
 
+/** 预混音轨是临时产物：与成品同目录，命名挂在 .partial 之后，成功/失败/取消都要清理。 */
+export function premixPartialPathFor(targetPath: string): string {
+  return `${partialPathFor(targetPath)}.wav`;
+}
+
 export function assertExportTargetPath(raw: unknown): string {
   if (typeof raw !== 'string') {
     throw new IpcError('IPC_INVALID_ARGUMENT', '导出位置无效。');

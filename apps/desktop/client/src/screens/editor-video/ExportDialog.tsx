@@ -33,7 +33,14 @@ const OUTPUT_SPECS = [
     label: '视频编码',
     value: EXPORT_OUTPUT_SPEC.videoCodec === 'h264' ? 'H.264' : EXPORT_OUTPUT_SPEC.videoCodec,
   },
-  { label: '音轨', value: '本版本不渲染音频' },
+  {
+    label: '音轨',
+    value:
+      EXPORT_OUTPUT_SPEC.audioCodec.toUpperCase() +
+      ' ' +
+      EXPORT_OUTPUT_SPEC.audioBitrateKbps +
+      'kbps · 源声静音',
+  },
 ] as const;
 
 function issuesFromDetails(details: unknown): ExportIssue[] | undefined {
@@ -268,7 +275,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
         {state.step === 'prepare' ? (
           <>
             <p className="ed-export-description">
-              把当前时间线的视频轨渲染为一个可播放的 MP4。开始前会自动保存当前编辑。
+              把当前时间线的画面、配音与音乐渲染为一个可播放的 MP4。开始前会自动保存当前编辑。
             </p>
 
             <div className="ed-export-path">
@@ -296,7 +303,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             </div>
 
             <p className="ed-export-note">
-              本切片只渲染视频轨：音频、字幕与剩余时间将在后续切片接入。
+              当前包含配音与音乐混音（源视频原声静音）；字幕与剩余时间将在后续切片接入。
             </p>
 
             {targetError ? <p className="ed-export-error">{targetError}</p> : null}

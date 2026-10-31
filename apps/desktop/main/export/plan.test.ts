@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { MusicTrack, VideoProject } from '@miaoma/video-project';
 import {
   compileExportPlan,
   ExportPlanError,
+  OUTPUT_CHANNELS,
   OUTPUT_FPS,
   OUTPUT_HEIGHT,
+  OUTPUT_SAMPLE_RATE,
   OUTPUT_WIDTH,
 } from './plan';
 import { createExportFixture } from './test-support/fixture';
@@ -14,16 +17,36 @@ function filterGraph(args: string[]): string {
   return index >= 0 ? (args[index + 1] ?? '') : '';
 }
 
+function argumentAfter(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+function musicTrack(project: VideoProject): MusicTrack {
+  const track = project.tracks.find(
+    (candidate): candidate is MusicTrack => candidate.kind === 'music',
+  );
+
+  if (!track) {
+    throw new Error('fixture missing music track');
+  }
+
+  return track;
+}
+
 describe('export plan compiler', () => {
-  it('compiles 1920x1080 30fps video-only ffmpeg arguments', () => {
+  it('compiles 1920x1080 30fps H.264/AAC 192k arguments with a premixed audio track', () => {
     const plan = compileExportPlan({
       ffmpegPath: 'ffmpeg',
       project: createExportFixture(),
       targetPath: 'C:\\导出\\成片.mp4',
     });
-    const graph = filterGraph(plan.ffmpeg.args);
+    const graph = filterGraph(plan.render.args);
 
     expect(plan.expected).toEqual({
+      audioBitrateKbps: 192,
+      audioCodec: 'aac',
       container: 'mp4',
       durationMs: 2_000,
       frameCount: 60,
@@ -33,13 +56,18 @@ describe('export plan compiler', () => {
       width: OUTPUT_WIDTH,
     });
     expect(plan.temporaryPath).toBe('C:\\导出\\成片.mp4.partial');
-    expect(plan.ffmpeg.command).toBe('ffmpeg');
-    expect(plan.ffmpeg.args).toContain('-an');
-    expect(plan.ffmpeg.args).toContain('-c:v');
-    expect(plan.ffmpeg.args).toContain('libx264');
-    expect(plan.ffmpeg.args).toContain('mp4');
-    expect(plan.ffmpeg.args).toContain('+faststart');
-    expect(plan.ffmpeg.args.at(-1)).toBe(plan.temporaryPath);
+    expect(plan.premixTemporaryPath).toBe('C:\\导出\\成片.mp4.partial.wav');
+    expect(plan.render.command).toBe('ffmpeg');
+    expect(plan.render.args).not.toContain('-an');
+    expect(plan.render.args).toContain(plan.premixTemporaryPath);
+    expect(argumentAfter(plan.render.args, '-c:v')).toBe('libx264');
+    expect(argumentAfter(plan.render.args, '-c:a')).toBe('aac');
+    expect(argumentAfter(plan.render.args, '-b:a')).toBe('192k');
+    expect(argumentAfter(plan.render.args, '-ar')).toBe(String(OUTPUT_SAMPLE_RATE));
+    expect(argumentAfter(plan.render.args, '-ac')).toBe(String(OUTPUT_CHANNELS));
+    expect(plan.render.args).toContain('mp4');
+    expect(plan.render.args).toContain('+faststart');
+    expect(plan.render.args.at(-1)).toBe(plan.temporaryPath);
     expect(graph).toContain('trim=start=0.000:end=1.000');
     expect(graph).toContain('fps=30');
     expect(graph).toContain('scale=1920:1080');
@@ -50,6 +78,123 @@ describe('export plan compiler', () => {
     expect(graph).not.toContain('C:\\');
   });
 
+  it('maps the premixed audio input after the video inputs and never the source audio', () => {
+    const plan = compileExportPlan({
+      ffmpegPath: 'ffmpeg',
+      project: createExportFixture(),
+      targetPath: 'C:\\out.mp4',
+    });
+    const mapValues = plan.render.args.flatMap((value, index) =>
+      value === '-map' ? [plan.render.args[index + 1] ?? ''] : [],
+    );
+
+    // 两个视频输入之后才是预混音轨；源视频只取 :v，原声不映射。
+    expect(mapValues).toEqual(['[vout]', '2:a']);
+  });
+
+  it('mixes voice clips by clip volume, speed and timeline start', () => {
+    const plan = compileExportPlan({
+      ffmpegPath: 'ffmpeg',
+      project: createExportFixture({ voiceSpeed: 1.5, voiceVolume: 0.4 }),
+      targetPath: 'C:\\out.mp4',
+    });
+    const graph = filterGraph(plan.premix.args);
+
+    expect(plan.premix.command).toBe('ffmpeg');
+    expect(plan.premix.args.at(-1)).toBe(plan.premixTemporaryPath);
+    expect(graph).toContain('atempo=1.5');
+    expect(graph).toContain('volume=0.4');
+    expect(graph).toContain('atrim=end_sample=48000');
+    expect(graph).toContain('apad=whole_len=96000');
+    expect(graph).toContain('adelay=1000|1000');
+    expect(graph).toContain('[voicebus]volume=1[aout]');
+    // 只有配音一路时不做二路混音，也不加倍增益。
+    expect(graph).not.toContain('musicbus');
+    expect(graph).not.toContain('C:\\');
+    expect(plan.premix.args).toContain('C:/media/voice.m4a');
+  });
+
+  it('loops a trimmed music window and mixes voice plus music with gain compensation', () => {
+    const plan = compileExportPlan({
+      ffmpegPath: 'ffmpeg',
+      project: createExportFixture({
+        musicLoop: true,
+        musicPath: 'C:/media/music.mp3',
+        musicSourceEndMs: 1_000,
+        musicVolume: 0.35,
+      }),
+      targetPath: 'C:\\out.mp4',
+    });
+    const graph = filterGraph(plan.premix.args);
+
+    expect(graph).toContain('atrim=start_sample=0:end_sample=48000');
+    expect(graph).toContain('aloop=loop=3:size=48000');
+    expect(graph).toContain('volume=0.35');
+    expect(graph).toContain(
+      '[voicebus][musicbus]amix=inputs=2:duration=longest,volume=2,alimiter=limit=0.98:level=false:attack=0.1',
+    );
+    expect(graph).toContain('[aout]');
+  });
+
+  it('does not loop music when loop is off and pads the silent tail', () => {
+    const plan = compileExportPlan({
+      ffmpegPath: 'ffmpeg',
+      project: createExportFixture({
+        musicLoop: false,
+        musicPath: 'C:/media/music.mp3',
+        musicSourceEndMs: 1_000,
+      }),
+      targetPath: 'C:\\out.mp4',
+    });
+    const graph = filterGraph(plan.premix.args);
+
+    expect(graph).not.toContain('aloop=');
+    expect(graph).toContain('atrim=start_sample=0:end_sample=48000');
+    expect(graph).toContain('apad=whole_len=96000');
+  });
+
+  it('drops the music track from the mix when the track is switched off', () => {
+    const project = createExportFixture({ musicPath: 'C:/media/music.mp3' });
+    project.tracks = project.tracks.map((track) =>
+      track.kind === 'music' ? { ...track, visible: false } : track,
+    );
+
+    const plan = compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' });
+    const graph = filterGraph(plan.premix.args);
+
+    expect(graph).not.toContain('musicbus');
+    expect(graph).not.toContain('C:/media/music.mp3');
+    expect(graph).toContain('[voicebus]volume=1[aout]');
+  });
+
+  it('emits a silent premix track when neither voice nor music carries clips', () => {
+    const project = createExportFixture();
+    project.tracks = project.tracks.filter((track) => track.kind !== 'voice');
+
+    const plan = compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' });
+    const graph = filterGraph(plan.premix.args);
+
+    expect(graph).toContain(`anullsrc=r=${OUTPUT_SAMPLE_RATE}:cl=stereo`);
+    expect(graph).toContain('atrim=end_sample=96000');
+    expect(graph).toContain('[aout]');
+    expect(plan.premix.args).not.toContain('-i');
+  });
+
+  it('rejects an audio clip that runs past the timeline', () => {
+    const project = createExportFixture({ musicPath: 'C:/media/music.mp3' });
+    const music = musicTrack(project).clips[0];
+
+    if (!music) {
+      throw new Error('fixture missing music clip');
+    }
+
+    music.endMs = 2_500;
+
+    expect(() =>
+      compileExportPlan({ ffmpegPath: 'ffmpeg', project, targetPath: 'C:\\out.mp4' }),
+    ).toThrow(ExportPlanError);
+  });
+
   it('applies clip speed to the source timestamps', () => {
     const plan = compileExportPlan({
       ffmpegPath: 'ffmpeg',
@@ -57,7 +202,7 @@ describe('export plan compiler', () => {
       targetPath: 'C:\\out.mp4',
     });
 
-    expect(filterGraph(plan.ffmpeg.args)).toContain('(PTS-STARTPTS)/2');
+    expect(filterGraph(plan.render.args)).toContain('(PTS-STARTPTS)/2');
   });
 
   it('loops image assets instead of trimming a single frame', () => {
@@ -66,7 +211,7 @@ describe('export plan compiler', () => {
       project: createExportFixture({ firstMediaType: 'image' }),
       targetPath: 'C:\\out.mp4',
     });
-    const args = plan.ffmpeg.args;
+    const args = plan.render.args;
 
     expect(args.join(' ')).toContain('-loop 1 -i C:/media/a.mp4');
     expect(filterGraph(args)).toContain('trim=end=1.000');
@@ -118,12 +263,12 @@ describe('export plan compiler', () => {
       project,
       targetPath: 'C:\\out.mp4',
     });
-    const graph = filterGraph(plan.ffmpeg.args);
+    const graph = filterGraph(plan.render.args);
 
     expect(plan.expected.durationMs).toBe(2_000);
     expect(plan.expected.frameCount).toBe(60);
     expect(graph.match(/trim=end_frame=30/g)).toHaveLength(2);
-    expect(plan.ffmpeg.args[plan.ffmpeg.args.indexOf('-t') + 1]).toBe('2.000');
+    expect(argumentAfter(plan.render.args, '-t')).toBe('2.000');
   });
 
   it('rejects a project without a video track', () => {

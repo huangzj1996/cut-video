@@ -15,9 +15,11 @@ import { probeVideo } from '@miaoma/video-agent';
 import type { VideoProject } from '@miaoma/video-project';
 import type { ExportProgress, ExportState } from '../../shared/ipc-contract';
 import { ProjectStore } from '../projects/project-store';
+import { startExportJob } from './job';
 import { compileExportPlan } from './plan';
 import { runExportProcess } from './runner';
 import { ExportService } from './service';
+import { syncToleranceMs } from './sync-check';
 import { createExportFixture } from './test-support/fixture';
 
 const FFMPEG =
@@ -315,6 +317,151 @@ function audioDurationSeconds(filePath: string): number {
   return seconds;
 }
 
+/** 生成“先静音再响”的配音素材：用来在成片里量出已知时刻的事件落点。 */
+function generateBeepAfterSilence(filePath: string, silenceMs: number, toneMs: number): void {
+  assertSpawnOk(
+    spawnSync(
+      FFMPEG,
+      [
+        '-y',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'anullsrc=r=' + SAMPLE_RATE + ':cl=stereo',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=' +
+          VOICE_FREQUENCY +
+          ':sample_rate=' +
+          SAMPLE_RATE +
+          ':duration=' +
+          toneMs / 1000,
+        '-filter_complex',
+        // 本构建的 anullsrc 没有 d 选项：用 atrim 从无限静音源里截出已知长度的一段。
+        '[0:a]atrim=end_sample=' +
+          Math.round((silenceMs / 1000) * SAMPLE_RATE) +
+          ',asetpts=PTS-STARTPTS[s];[s][1:a]concat=n=2:v=0:a=1[a]',
+        '-map',
+        '[a]',
+        '-ac',
+        '2',
+        '-c:a',
+        'pcm_s16le',
+        filePath,
+      ],
+      { encoding: 'utf8', windowsHide: true },
+    ),
+    'ffmpeg beep fixture',
+  );
+}
+
+/** 生成彩条夹具；inverted 版本取反，用来在成片里制造一个已知时刻的画面切换。 */
+function generateColorBarsClip(filePath: string, inverted: boolean): void {
+  assertSpawnOk(
+    spawnSync(
+      FFMPEG,
+      [
+        '-y',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'smptebars=s=640x360:r=30',
+        '-t',
+        '2',
+        ...(inverted ? ['-vf', 'negate'] : []),
+        '-pix_fmt',
+        'yuv420p',
+        '-c:v',
+        'libx264',
+        filePath,
+      ],
+      { encoding: 'utf8', windowsHide: true },
+    ),
+    'ffmpeg color bars fixture',
+  );
+}
+
+/**
+ * 逐帧缩成 4×4，用相邻帧差值找画面切换点落在第几帧。
+ * 彩条是静态图案，切换前帧差约为 0，切换那一帧（彩条取反）差异明显。
+ */
+function firstFrameChange(filePath: string): number {
+  const result = spawnSync(
+    FFMPEG,
+    [
+      '-v',
+      'error',
+      '-i',
+      filePath,
+      '-vf',
+      'scale=4:4',
+      '-vsync',
+      '0',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      'pipe:1',
+    ],
+    { maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+  );
+
+  if (result.status !== 0) {
+    throw new Error('ffmpeg frame scan failed: ' + String(result.stderr));
+  }
+
+  const data: Buffer = result.stdout;
+  const frameBytes = 4 * 4 * 3;
+  let previous: Buffer | null = null;
+
+  for (let offset = 0, frame = 0; offset + frameBytes <= data.length; offset += frameBytes) {
+    const current = data.subarray(offset, offset + frameBytes);
+
+    if (previous) {
+      let difference = 0;
+
+      for (let index = 0; index < frameBytes; index += 1) {
+        difference += Math.abs((current[index] ?? 0) - (previous[index] ?? 0));
+      }
+
+      if (difference / frameBytes > 40) {
+        return frame;
+      }
+    }
+
+    previous = current;
+    frame += 1;
+  }
+
+  return -1;
+}
+
+/** 在 [0, windowEndMs) 内找第一个明显非静音的样本，返回它的毫秒位置。 */
+function firstOnsetMs(samples: Float32Array, windowEndMs: number): number {
+  const end = Math.min(samples.length, Math.round((windowEndMs / 1000) * SAMPLE_RATE));
+  let peak = 0;
+
+  for (let index = 0; index < end; index += 1) {
+    peak = Math.max(peak, Math.abs(samples[index] ?? 0));
+  }
+
+  // 音调振幅在不同素材上不同：阈值用窗口峰值的比例，避免依赖绝对音量。
+  const threshold = peak * 0.2;
+
+  for (let index = 0; index < end; index += 1) {
+    if (Math.abs(samples[index] ?? 0) >= threshold) {
+      return (index / SAMPLE_RATE) * 1000;
+    }
+  }
+
+  return -1;
+}
+
 describe.skipIf(!HAS_FFMPEG)('export integration', () => {
   it('renders a playable MP4 with mixed voice and music, muted source audio and frame-accurate cuts', async () => {
     const root = tempRoot();
@@ -361,7 +508,7 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
-      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG }),
+      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
       onProgress: (event) => progress.push(event),
       onState: (state) => states.push(state),
     });
@@ -390,6 +537,12 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
     expect(rendered.some((event) => event.etaMs !== null)).toBe(true);
 
     expect(states.at(-1)).toMatchObject({ outputPath: targetPath, status: 'succeeded' });
+    // 成功态带上同步自检的客观数字，且都必须落在一个输出帧的容差内。
+    const sync = states.at(-1)?.sync;
+
+    expect(sync).toBeDefined();
+    expect(Math.abs(sync?.startDeltaMs ?? Number.NaN)).toBeLessThanOrEqual(syncToleranceMs(30));
+    expect(Math.abs(sync?.durationDeltaMs ?? Number.NaN)).toBeLessThanOrEqual(syncToleranceMs(30));
     expect(existsSync(targetPath)).toBe(true);
     expect(existsSync(targetPath + '.partial')).toBe(false);
     expect(existsSync(targetPath + '.partial.wav')).toBe(false);
@@ -525,7 +678,7 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
-      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG }),
+      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
       onProgress: (event) => {
         // 第一条真实进度到达后取消，覆盖“渲染阶段取消”的真实链路。
         if (
@@ -653,7 +806,7 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
-      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG }),
+      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
       onProgress: () => undefined,
       onState: (state) => states.push(state),
     });
@@ -749,4 +902,97 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
     // libass 日志：fontselect: (Noto Sans SC, 700, 0) -> NotoSansSC-Regular ...
     expect(probe.stderr).toContain('NotoSansSC-Regular');
   }, 60_000);
+
+  it('lands known audio and picture events within one output frame of the timeline', async () => {
+    const root = tempRoot();
+    const media = path.join(root, 'media');
+    mkdirSync(media);
+    const first = path.join(media, 'bars.mp4');
+    const second = path.join(media, 'bars-inverted.mp4');
+    const voice = path.join(media, 'beep.wav');
+    // 彩条夹具：第 2 段取反，画面切换点固定在时间线 1.000s（第 30 帧）。
+    generateColorBarsClip(first, false);
+    generateColorBarsClip(second, true);
+    // 配音素材先静音 200ms 再响：成片里第一个非静音样本就是 200ms 处的事件落点。
+    generateBeepAfterSilence(voice, 200, 1_800);
+
+    const store = new ProjectStore(path.join(root, 'projects'));
+    const created = store.create({ name: '事件落点' });
+    const projectId = created.project.projectId;
+    const fixture = createExportFixture({ audioPath: voice, videoPaths: [first, second] });
+    const saved = store.update({
+      expectedRevision: 0,
+      projectId,
+      project: { ...fixture, project: { ...fixture.project, name: '事件落点', projectId } },
+    });
+    const outputDirectory = path.join(root, '导出');
+    mkdirSync(outputDirectory);
+    const targetPath = path.join(outputDirectory, '事件落点.mp4');
+    const states: ExportState[] = [];
+    const service = new ExportService({
+      getExportFonts: () => FONTS,
+      getProjectStore: () => store,
+      getSettings: () => ({ defaultProjectDirectory: root }),
+      getWorkflowStatus: () => null,
+      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG, ffprobePath: FFPROBE }),
+      onProgress: () => undefined,
+      onState: (state) => states.push(state),
+    });
+
+    await service.start({ expectedRevision: saved.project.contentRevision, projectId, targetPath });
+    await service.whenIdle();
+
+    expect(states.at(-1)).toMatchObject({ status: 'succeeded' });
+
+    // 画面切换落在第 30 帧（1.000s），声音起点落在 200ms；误差都不超过一个输出帧。
+    const boundary = firstFrameChange(targetPath);
+    const onsetMs = firstOnsetMs(decodeMono(targetPath), 1_000);
+
+    expect(Math.abs(boundary - 30)).toBeLessThanOrEqual(1);
+    expect(onsetMs).toBeGreaterThanOrEqual(0);
+    expect(Math.abs(onsetMs - 200)).toBeLessThanOrEqual(syncToleranceMs(30));
+  }, 120_000);
+
+  it('rejects and does not commit a render with an injected 100ms audio offset', async () => {
+    const root = tempRoot();
+    const media = path.join(root, 'media');
+    mkdirSync(media);
+    const first = path.join(media, 'red.mp4');
+    const second = path.join(media, 'blue.mp4');
+    const voice = path.join(media, 'voice.wav');
+    generateClip(first, 'red');
+    generateClip(second, 'blue');
+    generateTone(voice, VOICE_FREQUENCY, 1);
+
+    const outputDirectory = path.join(root, '导出');
+    mkdirSync(outputDirectory);
+    const targetPath = path.join(outputDirectory, '偏移成片.mp4');
+    const plan = compileExportPlan({
+      artifactToken: 'run-sync-offset',
+      ffmpegPath: FFMPEG,
+      fonts: null,
+      project: createExportFixture({ audioPath: voice, videoPaths: [first, second] }),
+      targetPath,
+    });
+    // 给预混音轨输入加 -itsoffset 0.1：真实把音轨时间戳整体后移，制造可观测的失同步。
+    const premixInputIndex = plan.render.args.indexOf(plan.premixTemporaryPath);
+    const shiftedArgs = plan.render.args.slice();
+
+    shiftedArgs.splice(premixInputIndex - 1, 0, '-itsoffset', '0.1');
+
+    const result = await startExportJob({
+      ffprobePath: FFPROBE,
+      plan: { ...plan, render: { ...plan.render, args: shiftedArgs } },
+      runner: runExportProcess,
+    }).result;
+    const error = result.ok ? null : 'error' in result ? result.error : null;
+
+    expect(result.ok).toBe(false);
+    expect(error?.code).toBe('EXPORT_SYNC_CHECK_FAILED');
+    expect(error?.message).toContain('起点差');
+    // 未提交：目标文件不存在，临时成品与预混音轨都被清掉。
+    expect(existsSync(targetPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+    expect(existsSync(plan.premixTemporaryPath)).toBe(false);
+  }, 120_000);
 });

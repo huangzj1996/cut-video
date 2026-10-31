@@ -32,6 +32,8 @@ import {
 export interface ExportServiceMedia {
   ffmpegAvailable: boolean;
   ffmpegPath: string;
+  /** 同步自检用它读取成片事实；缺失时自检 fail closed，不提交成品。 */
+  ffprobePath: string;
 }
 
 export interface ExportServiceOptions {
@@ -58,6 +60,7 @@ interface ActiveExport {
 }
 
 interface ExecuteExportInput {
+  ffprobePath: string;
   plan: ExportPlan;
   projectId: string;
   runId: string;
@@ -226,6 +229,7 @@ export class ExportService {
     });
 
     const promise = this.execute({
+      ffprobePath: media.ffprobePath,
       plan,
       projectId: input.projectId,
       runId,
@@ -275,6 +279,7 @@ export class ExportService {
       publish('validating');
 
       job = startExportJob({
+        ffprobePath: input.ffprobePath,
         onPhase: publish,
         onProgress: (sample) => {
           const estimate = estimator.update(sample, {
@@ -307,6 +312,7 @@ export class ExportService {
           projectId: input.projectId,
           runId: input.runId,
           status: 'succeeded',
+          sync: result.sync.summary,
           targetPath: input.targetPath,
         });
         return;

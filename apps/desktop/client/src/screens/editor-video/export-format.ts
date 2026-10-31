@@ -46,6 +46,15 @@ export function formatExportSpeed(speed: number | null): string {
   return `${speed.toFixed(1)}x`;
 }
 
+/** 同步自检的客观数字：毫秒保留一位小数；没有测量值时不编数字。 */
+export function formatExportDelta(deltaMs: number | null): string {
+  if (deltaMs === null || !Number.isFinite(deltaMs) || deltaMs < 0) {
+    return '—';
+  }
+
+  return (Math.round(deltaMs * 10) / 10).toFixed(1) + 'ms';
+}
+
 export function formatExportPercent(percent: number | null): string {
   if (percent === null || !Number.isFinite(percent)) {
     return '—';

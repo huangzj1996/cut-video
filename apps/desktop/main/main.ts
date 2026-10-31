@@ -276,7 +276,11 @@ function getExportService(): ExportService {
     media: () => {
       const media = buildMediaInfo();
 
-      return { ffmpegAvailable: media.ffmpegExists, ffmpegPath: media.ffmpegPath };
+      return {
+        ffmpegAvailable: media.ffmpegExists,
+        ffmpegPath: media.ffmpegPath,
+        ffprobePath: media.ffprobePath,
+      };
     },
     onProgress: broadcastExportProgress,
     onState: broadcastExportState,

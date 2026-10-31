@@ -122,6 +122,17 @@ export interface ExportProgress {
   speed: number | null;
 }
 
+/**
+ * 同步自检通过的客观数字：成功态展示“起点差、时长差”，让用户看到成片确实对齐。
+ * 两处数值都是毫秒；读不到时为 null（这时导出本来也不会成功）。
+ */
+export interface ExportSyncSummary {
+  /** 两路时长与时间线的最大偏差。 */
+  durationDeltaMs: number | null;
+  /** 音视频起点的差。 */
+  startDeltaMs: number | null;
+}
+
 export interface ExportState {
   /** 失败与取消都带原因；取消时 code 是 EXPORT_CANCELLED。 */
   error?: ExportErrorInfo;
@@ -131,6 +142,8 @@ export interface ExportState {
   runId: string;
   /** cancelled 表示用户取消且临时产物已清理；取消后可以立即重新导出。 */
   status: 'cancelled' | 'failed' | 'running' | 'succeeded';
+  /** 只有通过同步自检并提交的成品才有；其余状态没有。 */
+  sync?: ExportSyncSummary;
   targetPath: string;
 }
 

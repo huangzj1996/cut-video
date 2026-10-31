@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatExportDelta,
   formatExportElapsed,
   formatExportEta,
   formatExportPercent,
@@ -69,6 +70,22 @@ describe('formatExportSpeed', () => {
     expect(formatExportSpeed(1.234)).toBe('1.2x');
     expect(formatExportSpeed(12.34)).toBe('12.3x');
     expect(formatExportSpeed(2)).toBe('2.0x');
+  });
+});
+
+describe('formatExportDelta', () => {
+  it('renders a placeholder without a measured value', () => {
+    expect(formatExportDelta(null)).toBe('—');
+    expect(formatExportDelta(Number.NaN)).toBe('—');
+    expect(formatExportDelta(Number.POSITIVE_INFINITY)).toBe('—');
+    expect(formatExportDelta(-1)).toBe('—');
+  });
+
+  it('keeps one decimal in milliseconds', () => {
+    expect(formatExportDelta(0)).toBe('0.0ms');
+    expect(formatExportDelta(78)).toBe('78.0ms');
+    expect(formatExportDelta(1000 / 30)).toBe('33.3ms');
+    expect(formatExportDelta(58.667)).toBe('58.7ms');
   });
 });
 

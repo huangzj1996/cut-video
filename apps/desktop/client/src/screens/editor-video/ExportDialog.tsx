@@ -9,6 +9,7 @@ import {
   type ExportDialogError,
 } from './export-dialog';
 import {
+  formatExportDelta,
   formatExportElapsed,
   formatExportEta,
   formatExportPercent,
@@ -444,20 +445,13 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
                     style={{ width: `${percent ?? 0}%` }}
                   />
                 </div>
-                <dl className="ed-export-metrics">
-                  <div className="ed-export-metric">
-                    <dt>预计剩余</dt>
-                    <dd>{formatExportEta(progress?.etaMs ?? null)}</dd>
-                  </div>
-                  <div className="ed-export-metric">
-                    <dt>已用</dt>
-                    <dd>{formatExportElapsed(progress?.elapsedMs ?? 0)}</dd>
-                  </div>
-                  <div className="ed-export-metric">
-                    <dt>速度</dt>
-                    <dd>{formatExportSpeed(progress?.speed ?? null)}</dd>
-                  </div>
-                </dl>
+                <ExportMetrics
+                  rows={[
+                    { label: '预计剩余', value: formatExportEta(progress?.etaMs ?? null) },
+                    { label: '已用', value: formatExportElapsed(progress?.elapsedMs ?? 0) },
+                    { label: '速度', value: formatExportSpeed(progress?.speed ?? null) },
+                  ]}
+                />
               </>
             ) : null}
 
@@ -508,10 +502,20 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
 
         {state.step === 'succeeded' ? (
           <>
-            <p className="ed-export-description">成品已提交，可以直接用常用播放器打开。</p>
+            <p className="ed-export-description">
+              成品已提交并通过同步自检，可以直接用常用播放器打开。
+            </p>
             <p className="ed-export-path-value" title={state.outputPath ?? ''}>
               {state.outputPath}
             </p>
+            {state.sync ? (
+              <ExportMetrics
+                rows={[
+                  { label: '起点差', value: formatExportDelta(state.sync.startDeltaMs) },
+                  { label: '时长差', value: formatExportDelta(state.sync.durationDeltaMs) },
+                ]}
+              />
+            ) : null}
             {targetError ? <p className="ed-export-error">{targetError}</p> : null}
             <div className="ed-export-actions">
               <button className="ed-export-secondary" onClick={onClose} type="button">
@@ -547,6 +551,19 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
         ) : null}
       </section>
     </div>
+  );
+}
+
+function ExportMetrics({ rows }: { rows: readonly { label: string; value: string }[] }) {
+  return (
+    <dl className="ed-export-metrics">
+      {rows.map((row) => (
+        <div className="ed-export-metric" key={row.label}>
+          <dt>{row.label}</dt>
+          <dd>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

@@ -13,6 +13,24 @@ import {
   EXPORT_TEST_FONTS,
   type ExportFixtureOptions,
 } from './test-support/fixture';
+import { GOLDEN_SYNC_OFFSET_FFPROBE_JSON } from './test-support/ffprobe-golden';
+import { ffprobeAnswerFor, isProbeRequest } from './test-support/probe';
+
+/** 夹具工程是 2 秒时间线；这组数值与计划编译器的 expected 一致。 */
+const PROBE_ANSWER = ffprobeAnswerFor({
+  audioCodec: 'aac',
+  durationMs: 2_000,
+  fps: 30,
+  height: 1080,
+  videoCodec: 'h264',
+  width: 1920,
+});
+
+function answerProbe(request: ExportProcessRequest, json = PROBE_ANSWER): void {
+  if (isProbeRequest(request)) {
+    request.onStdoutChunk?.(json);
+  }
+}
 
 let root: string;
 let mediaRoot: string;
@@ -63,7 +81,7 @@ function createService(overrides: Partial<ExportServiceOptions> = {}): {
     getProjectStore: () => store,
     getSettings: () => ({ defaultProjectDirectory: root }),
     getWorkflowStatus: () => null,
-    media: () => ({ ffmpegAvailable: true, ffmpegPath: 'ffmpeg' }),
+    media: () => ({ ffmpegAvailable: true, ffmpegPath: 'ffmpeg', ffprobePath: 'ffprobe' }),
     onProgress: (event) => progress.push(event),
     onState: (event) => states.push(event),
     ...overrides,
@@ -91,6 +109,7 @@ function writeLastArg(request: ExportProcessRequest): void {
 function successRunner(): ExportProcessRunner {
   return (request) => {
     writeLastArg(request);
+    answerProbe(request);
 
     return createFakeProcess({ autoExit: okProcess() });
   };
@@ -131,6 +150,7 @@ describe('export service', () => {
       'running:validating',
       'running:mixing',
       'running:rendering',
+      'running:verifying',
       'running:committing',
       'succeeded:committing',
     ]);
@@ -138,6 +158,7 @@ describe('export service', () => {
       'validating',
       'mixing',
       'rendering',
+      'verifying',
       'committing',
     ]);
     expect(existsSync(targetPath())).toBe(true);
@@ -154,6 +175,8 @@ describe('export service', () => {
         request.onStdoutChunk?.('out_time_us=1000000\nspeed=2.0x\nprogress=continue\n');
         request.onStdoutChunk?.('out_time_us=2000000\nspeed=2.0x\nprogress=end\n');
       }
+
+      answerProbe(request);
 
       return createFakeProcess({ autoExit: okProcess() });
     };
@@ -184,6 +207,8 @@ describe('export service', () => {
       writeLastArg(request);
 
       if (!manualRender) {
+        answerProbe(request);
+
         return createFakeProcess({ autoExit: okProcess() });
       }
 
@@ -263,6 +288,40 @@ describe('export service', () => {
 
     expect(states.at(-1)).toMatchObject({ status: 'failed' });
     expect(states.at(-1)?.error?.detail).toContain('Unknown filter ass');
+  });
+
+  it('reports the sync self-check measurements on success', async () => {
+    const { service, states } = createService({ createRunner: successRunner });
+
+    await service.start({ expectedRevision: revision, projectId, targetPath: targetPath() });
+    await service.whenIdle();
+
+    expect(states.at(-1)?.status).toBe('succeeded');
+    expect(states.at(-1)?.sync).toEqual({ durationDeltaMs: 0, startDeltaMs: 0 });
+  });
+
+  it('fails with EXPORT_SYNC_CHECK_FAILED and does not commit when the self-check fails', async () => {
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+      // 真实注入 100ms 音轨偏移的 ffprobe 输出：自检必须判失败且不提交。
+      answerProbe(request, GOLDEN_SYNC_OFFSET_FFPROBE_JSON);
+
+      return createFakeProcess({ autoExit: okProcess() });
+    };
+    const { service, states } = createService({ createRunner: () => runner });
+
+    await service.start({ expectedRevision: revision, projectId, targetPath: targetPath() });
+    await service.whenIdle();
+
+    expect(states.at(-1)).toMatchObject({
+      phase: 'verifying',
+      status: 'failed',
+    });
+    expect(states.at(-1)?.error?.code).toBe('EXPORT_SYNC_CHECK_FAILED');
+    expect(states.at(-1)?.error?.message).toContain('起点差');
+    expect(states.at(-1)?.sync).toBeUndefined();
+    expect(existsSync(targetPath())).toBe(false);
+    expect(readdirSync(workspaceRoot())).toEqual([]);
   });
 
   it('rejects a stale content revision', async () => {

@@ -5,8 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXPORT_CANCEL_GRACE_MS, startExportJob } from './job';
 import { compileExportPlan, type ExportPlan } from './plan';
 import type { ExportProcessRequest, ExportProcessRunner } from './runner';
+import { buildFfprobeArgs, syncToleranceMs } from './sync-check';
 import { createFakeProcess, okProcess, type FakeProcess } from './test-support/fake-process';
 import { createExportFixture } from './test-support/fixture';
+import { GOLDEN_SYNC_OFFSET_FFPROBE_JSON } from './test-support/ffprobe-golden';
+import { ffprobeAnswerFor, isProbeRequest } from './test-support/probe';
 
 let root: string;
 let plan: ExportPlan;
@@ -39,6 +42,18 @@ function isPremixRequest(request: ExportProcessRequest): boolean {
   return request.args === plan.premix.args;
 }
 
+/**
+ * 成功进程。探测请求（ffprobe）要写出一份“正常成片”的 ffprobe 输出，
+ * 否则导出任务会按 fail closed 处理，把不可读的媒体信息判成自检失败。
+ */
+function okFor(request: ExportProcessRequest): FakeProcess {
+  if (isProbeRequest(request)) {
+    request.onStdoutChunk?.(ffprobeAnswerFor(plan.expected));
+  }
+
+  return createFakeProcess({ autoExit: okProcess() });
+}
+
 function requireProcess(value: FakeProcess | null): FakeProcess {
   if (value === null) {
     throw new Error('渲染进程应该已经启动');
@@ -55,18 +70,23 @@ describe('export job', () => {
       received.push(request.args);
       writeLastArg(request);
 
-      return createFakeProcess({ autoExit: okProcess() });
+      return okFor(request);
     };
 
     const result = await startExportJob({
+      ffprobePath: 'ffprobe',
       onPhase: (phase) => phases.push(phase),
       plan,
       runner,
     }).result;
 
-    expect(result).toEqual({ ok: true, outputPath: plan.targetPath });
-    expect(phases).toEqual(['mixing', 'rendering', 'committing']);
-    expect(received).toEqual([plan.premix.args, plan.render.args]);
+    expect(result).toMatchObject({ ok: true, outputPath: plan.targetPath });
+    expect(phases).toEqual(['mixing', 'rendering', 'verifying', 'committing']);
+    expect(received).toEqual([
+      plan.premix.args,
+      plan.render.args,
+      buildFfprobeArgs(plan.temporaryPath),
+    ]);
     expect(existsSync(plan.targetPath)).toBe(true);
     expect(existsSync(plan.temporaryPath)).toBe(false);
     expect(existsSync(plan.premixTemporaryPath)).toBe(false);
@@ -81,7 +101,7 @@ describe('export job', () => {
       return createFakeProcess({ autoExit: { exitCode: 1, stderrTail: 'premix boom' } });
     };
 
-    const result = await startExportJob({ plan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
 
     expect(result.ok).toBe(false);
     expect(result.ok ? null : 'error' in result ? result.error.message : '').toContain('预混音轨');
@@ -105,7 +125,7 @@ describe('export job', () => {
       });
     };
 
-    const result = await startExportJob({ plan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
 
     expect(result.ok).toBe(false);
     expect(calls).toBe(1);
@@ -113,9 +133,9 @@ describe('export job', () => {
   });
 
   it('rejects a zero exit code without a premix file', async () => {
-    const runner: ExportProcessRunner = () => createFakeProcess({ autoExit: okProcess() });
+    const runner: ExportProcessRunner = (request) => okFor(request);
 
-    const result = await startExportJob({ plan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
 
     expect(result.ok).toBe(false);
     expect(result.ok ? null : 'error' in result ? result.error.message : '').toContain('预混音轨');
@@ -133,7 +153,7 @@ describe('export job', () => {
       });
     };
 
-    const result = await startExportJob({ plan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
 
     expect(result.ok).toBe(false);
     const error = result.ok ? null : 'error' in result ? result.error : null;
@@ -150,7 +170,7 @@ describe('export job', () => {
         autoExit: isPremixRequest(request) ? (writeLastArg(request), okProcess()) : okProcess(),
       });
 
-    const result = await startExportJob({ plan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
 
     expect(result.ok).toBe(false);
     expect(result.ok ? null : 'error' in result ? result.error.code : '').toBe(
@@ -166,15 +186,16 @@ describe('export job progress', () => {
     const runner: ExportProcessRunner = (request) => {
       writeLastArg(request);
 
-      if (!isPremixRequest(request)) {
+      if (!isPremixRequest(request) && !isProbeRequest(request)) {
         request.onStdoutChunk?.('out_time_us=500000\nspeed=2.0x\nprogress=continue\n');
         request.onStdoutChunk?.('out_time_us=1500000\nspeed=2.5x\nprogress=end\n');
       }
 
-      return createFakeProcess({ autoExit: okProcess() });
+      return okFor(request);
     };
 
     const result = await startExportJob({
+      ffprobePath: 'ffprobe',
       onProgress: (sample) => samples.push(sample),
       plan,
       runner,
@@ -188,6 +209,140 @@ describe('export job progress', () => {
   });
 });
 
+describe('export job sync self-check', () => {
+  it('checks the rendered file before committing and reports the measured numbers', async () => {
+    const received: string[][] = [];
+    const runner: ExportProcessRunner = (request) => {
+      received.push(request.args);
+      writeLastArg(request);
+
+      return okFor(request);
+    };
+
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
+
+    if (!result.ok) {
+      throw new Error('export should succeed');
+    }
+
+    expect(received.at(-2)).toEqual(plan.render.args);
+    expect(received.at(-1)).toEqual(buildFfprobeArgs(plan.temporaryPath));
+    expect(received).toHaveLength(3);
+    expect(result.sync.passed).toBe(true);
+    expect(result.sync.toleranceMs).toBeCloseTo(syncToleranceMs(30), 6);
+    expect(result.sync.measurements).toEqual({
+      audioDurationMs: 2_000,
+      audioStartMs: 0,
+      durationDeltaMs: 0,
+      startDeltaMs: 0,
+      videoDurationMs: 2_000,
+      videoStartMs: 0,
+    });
+    expect(existsSync(plan.targetPath)).toBe(true);
+  });
+
+  it('refuses to commit a file that fails the sync self-check and cleans every temp artifact', async () => {
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (isProbeRequest(request)) {
+        // 真实注入 100ms 音轨偏移后的 ffprobe 输出：音频起点 78ms、时长 1.941333s。
+        request.onStdoutChunk?.(GOLDEN_SYNC_OFFSET_FFPROBE_JSON);
+
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      return okFor(request);
+    };
+
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
+    const error = result.ok ? null : 'error' in result ? result.error : null;
+
+    expect(result.ok).toBe(false);
+    expect(error?.code).toBe('EXPORT_SYNC_CHECK_FAILED');
+    expect(error?.message).toContain('同步自检未通过');
+    expect(error?.message).toContain('起点差');
+    expect(error?.detail).toContain('audio starts at');
+    expect(existsSync(plan.targetPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+    expect(existsSync(plan.premixTemporaryPath)).toBe(false);
+  });
+
+  it('fails closed when ffprobe cannot read the rendered file', async () => {
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (isProbeRequest(request)) {
+        return createFakeProcess({
+          autoExit: { exitCode: 1, stderrTail: 'invalid data found when processing input' },
+        });
+      }
+
+      return okFor(request);
+    };
+
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
+    const error = result.ok ? null : 'error' in result ? result.error : null;
+
+    expect(error?.code).toBe('EXPORT_SYNC_CHECK_FAILED');
+    expect(error?.message).toContain('读取成片媒体信息失败');
+    expect(error?.detail).toContain('invalid data found when processing input');
+    expect(existsSync(plan.targetPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+  });
+
+  it('fails closed when ffprobe returns output that is not media JSON', async () => {
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (isProbeRequest(request)) {
+        request.onStdoutChunk?.('not a probe result');
+
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      return okFor(request);
+    };
+
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan, runner }).result;
+    const error = result.ok ? null : 'error' in result ? result.error : null;
+
+    expect(error?.code).toBe('EXPORT_SYNC_CHECK_FAILED');
+    expect(error?.message).toContain('无法读取成片媒体信息');
+    expect(existsSync(plan.targetPath)).toBe(false);
+  });
+
+  it('cancels during the sync self-check without committing', async () => {
+    let probeProcess: FakeProcess | null = null;
+    let markProbeStarted: () => void = () => undefined;
+    const probeStarted = new Promise<void>((resolve) => {
+      markProbeStarted = resolve;
+    });
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (isProbeRequest(request)) {
+        probeProcess = createFakeProcess({ exitOnQuit: okProcess() });
+        markProbeStarted();
+
+        return probeProcess;
+      }
+
+      return okFor(request);
+    };
+
+    const job = startExportJob({ ffprobePath: 'ffprobe', plan, runner });
+    await probeStarted;
+    job.cancel();
+    const result = await job.result;
+
+    expect(result).toEqual({ cancelled: true, ok: false, phase: 'verifying' });
+    expect(requireProcess(probeProcess).quitCount).toBe(1);
+    expect(existsSync(plan.targetPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+  });
+});
+
 describe('export job cancellation', () => {
   it('cancels during premix by asking the process to quit and never rendering or committing', async () => {
     const quits: string[] = [];
@@ -198,7 +353,7 @@ describe('export job cancellation', () => {
       if (!isPremixRequest(request)) {
         renderStarted = true;
 
-        return createFakeProcess({ autoExit: okProcess() });
+        return okFor(request);
       }
 
       return createFakeProcess({
@@ -207,7 +362,7 @@ describe('export job cancellation', () => {
       });
     };
 
-    const job = startExportJob({ plan, runner });
+    const job = startExportJob({ ffprobePath: 'ffprobe', plan, runner });
     job.cancel();
     const result = await job.result;
 
@@ -229,7 +384,7 @@ describe('export job cancellation', () => {
       writeLastArg(request);
 
       if (isPremixRequest(request)) {
-        return createFakeProcess({ autoExit: okProcess() });
+        return okFor(request);
       }
 
       renderProcess = createFakeProcess({ exitOnQuit: { exitCode: 0, stderrTail: '' } });
@@ -238,7 +393,7 @@ describe('export job cancellation', () => {
       return renderProcess;
     };
 
-    const job = startExportJob({ plan, runner });
+    const job = startExportJob({ ffprobePath: 'ffprobe', plan, runner });
     await renderStarted;
     job.cancel();
     const result = await job.result;
@@ -262,7 +417,7 @@ describe('export job cancellation', () => {
       writeLastArg(request);
 
       if (isPremixRequest(request)) {
-        return createFakeProcess({ autoExit: okProcess() });
+        return okFor(request);
       }
 
       renderProcess = createFakeProcess();
@@ -271,7 +426,7 @@ describe('export job cancellation', () => {
       return renderProcess;
     };
 
-    const job = startExportJob({ plan, runner });
+    const job = startExportJob({ ffprobePath: 'ffprobe', plan, runner });
     await renderStarted;
     job.cancel();
 
@@ -298,7 +453,7 @@ describe('export job cancellation', () => {
       writeLastArg(request);
 
       if (isPremixRequest(request)) {
-        return createFakeProcess({ autoExit: okProcess() });
+        return okFor(request);
       }
 
       renderProcess = createFakeProcess();
@@ -307,7 +462,7 @@ describe('export job cancellation', () => {
       return renderProcess;
     };
 
-    const job = startExportJob({ plan, runner });
+    const job = startExportJob({ ffprobePath: 'ffprobe', plan, runner });
     await renderStarted;
     requireProcess(renderProcess).resolve(okProcess());
     // 在渲染退出后的 continuation 之前同步请求取消：提交前必须看到取消标记。
@@ -323,7 +478,9 @@ describe('export job cancellation', () => {
     let quits = 0;
     const runner: ExportProcessRunner = (request) => {
       writeLastArg(request);
-      const fake = createFakeProcess({ autoExit: okProcess() });
+      const fake = isProbeRequest(request)
+        ? okFor(request)
+        : createFakeProcess({ autoExit: okProcess() });
       fake.requestQuit = () => {
         quits += 1;
       };
@@ -331,7 +488,7 @@ describe('export job cancellation', () => {
       return fake;
     };
 
-    const job = startExportJob({ plan, runner });
+    const job = startExportJob({ ffprobePath: 'ffprobe', plan, runner });
     const result = await job.result;
     job.cancel();
 
@@ -382,10 +539,11 @@ describe('export job subtitle artifacts', () => {
       }
 
       writeLastArg(request);
-      return createFakeProcess({ autoExit: okProcess() });
+      return okFor(request);
     };
 
-    const result = await startExportJob({ plan: renderPlan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan: renderPlan, runner })
+      .result;
 
     expect(result.ok).toBe(true);
     expect(observed?.cwd).toBe(path.dirname(renderPlan.targetPath));
@@ -417,7 +575,8 @@ describe('export job subtitle artifacts', () => {
       });
     };
 
-    const result = await startExportJob({ plan: renderPlan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan: renderPlan, runner })
+      .result;
 
     expect(result.ok).toBe(false);
     expect(existsSync(subtitles.assPath)).toBe(false);
@@ -435,13 +594,14 @@ describe('export job subtitle artifacts', () => {
       targetPath: path.join(root, '成片.mp4'),
     });
     let called = false;
-    const runner: ExportProcessRunner = () => {
+    const runner: ExportProcessRunner = (request) => {
       called = true;
 
-      return createFakeProcess({ autoExit: okProcess() });
+      return okFor(request);
     };
 
-    const result = await startExportJob({ plan: renderPlan, runner }).result;
+    const result = await startExportJob({ ffprobePath: 'ffprobe', plan: renderPlan, runner })
+      .result;
 
     expect(result.ok).toBe(false);
     expect(result.ok ? null : 'error' in result ? result.error.code : '').toBe(

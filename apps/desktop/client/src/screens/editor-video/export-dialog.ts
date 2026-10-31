@@ -4,6 +4,7 @@ import type {
   ExportPhase,
   ExportProgress,
   ExportState,
+  ExportSyncSummary,
   IpcErrorCode,
 } from '../../../../shared/ipc-contract';
 
@@ -42,6 +43,8 @@ export interface ExportDialogState {
   projectId: string;
   runId: string | null;
   step: ExportDialogStep;
+  /** 通过同步自检的成品才有客观数字；其余状态为 null。 */
+  sync: ExportSyncSummary | null;
   targetPath: string;
 }
 
@@ -114,6 +117,7 @@ export function createExportDialogState(projectId = '', targetPath = ''): Export
     projectId,
     runId: null,
     step: 'prepare',
+    sync: null,
     targetPath,
   };
 }
@@ -151,6 +155,7 @@ function stateFromEvent(state: ExportDialogState, event: ExportState): ExportDia
       phase: event.phase,
       progress: null,
       step: 'succeeded',
+      sync: event.sync ?? null,
     };
   }
 
@@ -166,6 +171,7 @@ function stateFromEvent(state: ExportDialogState, event: ExportState): ExportDia
       progress: null,
       runId: null,
       step: 'prepare',
+      sync: null,
     };
   }
 
@@ -185,6 +191,7 @@ function stateFromEvent(state: ExportDialogState, event: ExportState): ExportDia
     phase: event.phase,
     progress: null,
     step: 'failed',
+    sync: null,
   };
 }
 
@@ -241,6 +248,7 @@ export function exportDialogReducer(
         progress: null,
         runId: action.runId,
         step: 'running',
+        sync: null,
         targetPath: action.targetPath,
       };
 
@@ -294,6 +302,7 @@ export function exportDialogReducer(
             progress: null,
             runId: null,
             step: 'prepare',
+            sync: null,
           }
         : state;
 

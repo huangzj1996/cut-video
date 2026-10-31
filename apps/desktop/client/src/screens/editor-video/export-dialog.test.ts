@@ -178,13 +178,37 @@ describe('export dialog reducer', () => {
         outputPath: 'C:/out.mp4',
         phase: 'committing',
         status: 'succeeded',
+        sync: { durationDeltaMs: 0, startDeltaMs: 0 },
       }),
       type: 'state',
     });
 
     expect(state.step).toBe('succeeded');
     expect(state.outputPath).toBe('C:/out.mp4');
+    expect(state.sync).toEqual({ durationDeltaMs: 0, startDeltaMs: 0 });
     expect(isExportDialogLocked(state)).toBe(false);
+  });
+
+  it('has no sync measurements until the export succeeds', () => {
+    let state = startedState();
+
+    expect(state.sync).toBeNull();
+
+    state = exportDialogReducer(state, {
+      state: runningState({ phase: 'verifying' }),
+      type: 'state',
+    });
+    expect(state.sync).toBeNull();
+
+    state = exportDialogReducer(state, {
+      state: runningState({
+        error: { code: 'EXPORT_SYNC_CHECK_FAILED', message: '同步自检未通过。' },
+        phase: 'verifying',
+        status: 'failed',
+      }),
+      type: 'state',
+    });
+    expect(state.sync).toBeNull();
   });
 
   it('moves to failed with issues and can retry from prepare', () => {

@@ -1,5 +1,6 @@
 import { EXPORT_CANCELLED_NOTICE } from '../../shared/export-copy';
 import type { VideoCapabilityProblem } from '../../shared/video-capabilities';
+import type { ExportSyncIssueCode, ExportSyncReport } from './sync-check';
 
 /**
  * 导出链路上所有面向用户的中文文案集中在这里。
@@ -39,6 +40,18 @@ export const EXPORT_MESSAGES = {
   renderEmpty: '渲染没有产出有效文件，导出未完成。',
   commitFailed: '无法提交导出成品，请检查保存位置。',
 
+  /** 同步自检（结构性）的中文文案；客观数字由 exportSyncFailureMessage 拼进主句。 */
+  syncCheck: {
+    unreadable: '无法读取成片媒体信息，同步自检未通过，未提交成品。',
+    probeFailed: '读取成片媒体信息失败，同步自检未通过，未提交成品。',
+    durationUnreadable: '成片时长读不到',
+    frameRateUnreadable: '成片帧率读不到',
+    missingStreams: '成片缺少视频流或音轨',
+    outputMismatch: '输出参数与渲染配置不一致',
+    startUnreadable: '成片起点读不到',
+    resolutionUnreadable: '成片分辨率读不到',
+  },
+
   /** 导出计划编译器拒绝导出时使用的原因。 */
   plan: {
     audioOutOfTimeline: '音频片段超出时间线，无法导出。',
@@ -52,6 +65,78 @@ export const EXPORT_MESSAGES = {
     voiceAssetMissing: '配音片段引用了不存在的音频素材。',
   },
 } as const;
+
+function formatDeltaMs(value: number): string {
+  // 客观数字保留一位小数：既能看出 0.033s 级别的偏差，也不至于噪声化。
+  return `${(Math.round(value * 10) / 10).toFixed(1)}ms`;
+}
+
+/** 按 code 把自检问题归到一句中文短句上；新增 code 时这里补一行即可。 */
+function syncIssueText(code: ExportSyncIssueCode): string | null {
+  switch (code) {
+    case 'MISSING_VIDEO_STREAM':
+    case 'MISSING_AUDIO_STREAM':
+      return EXPORT_MESSAGES.syncCheck.missingStreams;
+    case 'VIDEO_CODEC_MISMATCH':
+    case 'AUDIO_CODEC_MISMATCH':
+    case 'RESOLUTION_MISMATCH':
+    case 'FRAME_RATE_MISMATCH':
+      return EXPORT_MESSAGES.syncCheck.outputMismatch;
+    case 'MISSING_DURATION':
+      return EXPORT_MESSAGES.syncCheck.durationUnreadable;
+    case 'MISSING_START_TIME':
+      return EXPORT_MESSAGES.syncCheck.startUnreadable;
+    case 'MISSING_RESOLUTION':
+      return EXPORT_MESSAGES.syncCheck.resolutionUnreadable;
+    case 'MISSING_FRAME_RATE':
+      return EXPORT_MESSAGES.syncCheck.frameRateUnreadable;
+    default:
+      return null;
+  }
+}
+
+/**
+ * 同步自检失败的主句：先给客观数字（起点差、时长差），再说差异类别。
+ * 失败细节（issue 的技术描述）另走 exportSyncIssueDetail，与 stderr 一样只放在“查看失败详情”里。
+ */
+export function exportSyncFailureMessage(report: ExportSyncReport): string {
+  const codes = report.issues.map((issue) => issue.code);
+
+  if (codes.includes('METADATA_UNPARSABLE')) {
+    return EXPORT_MESSAGES.syncCheck.unreadable;
+  }
+
+  const { durationDeltaMs, startDeltaMs } = report.measurements;
+  const parts: string[] = [];
+
+  if (startDeltaMs !== null && durationDeltaMs !== null) {
+    parts.push(
+      `音视频起点差 ${formatDeltaMs(startDeltaMs)}、时长差 ${formatDeltaMs(durationDeltaMs)}（容差一个输出帧，${formatDeltaMs(report.toleranceMs)}）`,
+    );
+  }
+
+  // 同一类问题只出现一次，避免“缺流”这类结论在句子里重复。
+  const summaries = new Set<string>();
+
+  for (const code of codes) {
+    const text = syncIssueText(code);
+
+    if (text !== null) {
+      summaries.add(text);
+    }
+  }
+
+  parts.push(...summaries);
+
+  return `同步自检未通过（${parts.join('；')}），未提交成品。`;
+}
+
+/** 同步自检失败的技术细节；与 ffmpeg 的 stderr 尾部一样只进可展开详情。 */
+export function exportSyncIssueDetail(report: ExportSyncReport): string | undefined {
+  const lines = report.issues.map((issue) => issue.code + ': ' + issue.detail);
+
+  return lines.length > 0 ? lines.join('\n') : undefined;
+}
 
 /** 能力边界文案里统一引用的格式提示。 */
 export const EXPORT_FORMAT_HINT = '目前仅支持 H.264/AAC 的 MP4/MOV。';

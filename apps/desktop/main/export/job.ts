@@ -1,16 +1,24 @@
 import { copyFileSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { ExportErrorInfo, ExportPhase } from '../../shared/ipc-contract';
+import type { ExportErrorCode, ExportErrorInfo, ExportPhase } from '../../shared/ipc-contract';
 import { exportTempArtifactsFromPlan, removeExportTempArtifacts } from './artifacts';
-import { EXPORT_MESSAGES } from './messages';
+import { EXPORT_MESSAGES, exportSyncFailureMessage, exportSyncIssueDetail } from './messages';
 import type { ExportPlan } from './plan';
 import { createRenderProgressParser, type RenderProgressSample } from './progress';
 import type { ExportProcessHandle, ExportProcessResult, ExportProcessRunner } from './runner';
+import {
+  buildFfprobeArgs,
+  evaluateExportSync,
+  parseFfprobeJson,
+  type ExportSyncReport,
+} from './sync-check';
 
 /** 取消时先请 ffmpeg 优雅退出，最多等这么久再强杀进程树。 */
 export const EXPORT_CANCEL_GRACE_MS = 3_000;
 
 export interface ExportJobOptions {
+  /** ffprobe 可执行文件；同步自检用它读取成片事实。 */
+  ffprobePath: string;
   onPhase?: (phase: ExportPhase) => void;
   /** 渲染阶段的真实进度样本；mixing/committing 等阶段不会回调。 */
   onProgress?: (sample: RenderProgressSample) => void;
@@ -21,7 +29,7 @@ export interface ExportJobOptions {
 export type ExportJobResult =
   | { cancelled: true; ok: false; phase: ExportPhase }
   | { error: ExportErrorInfo; ok: false }
-  | { ok: true; outputPath: string };
+  | { ok: true; outputPath: string; sync: ExportSyncReport };
 
 export interface ExportJobHandle {
   /** 请求取消；重复调用是 no-op。任务会等到当前进程退出并清理完临时产物后才收束。 */
@@ -43,17 +51,26 @@ function fileSize(filePath: string): number {
 }
 
 /** 失败原因保留 stderr 尾部，供“查看失败详情”在本次会话内展开。 */
-function failure(message: string, stderrTail: string): ExportJobResult {
-  const detail = stderrTail.trim();
+function jobFailure(code: ExportErrorCode, message: string, detail: string): ExportJobResult {
+  const trimmed = detail.trim();
 
   return {
-    error: { code: 'EXPORT_RENDER_FAILED', message, ...(detail.length > 0 ? { detail } : {}) },
+    error: { code, message, ...(trimmed.length > 0 ? { detail: trimmed } : {}) },
     ok: false,
   };
 }
 
+function failure(message: string, stderrTail: string): ExportJobResult {
+  return jobFailure('EXPORT_RENDER_FAILED', message, stderrTail);
+}
+
 function cancelledResult(phase: ExportPhase): ExportJobResult {
   return { cancelled: true, ok: false, phase };
+}
+
+/** 自检失败：成品没有通过判定，或者读不到可判定的媒体事实，两种都不提交。 */
+function syncFailure(message: string, detail: string | undefined): ExportJobResult {
+  return jobFailure('EXPORT_SYNC_CHECK_FAILED', message, detail ?? '');
 }
 
 /**
@@ -220,6 +237,40 @@ export function startExportJob(options: ExportJobOptions): ExportJobHandle {
         return cancelledResult('rendering');
       }
 
+      // 同步自检：读成片的结构性事实，判定通过才允许提交。
+      let probeStdout = '';
+      const probeOutcome = await runPhase(
+        'verifying',
+        { args: buildFfprobeArgs(plan.temporaryPath), command: options.ffprobePath },
+        (chunk) => {
+          probeStdout += chunk;
+        },
+      );
+
+      if (probeOutcome.status === 'cancelled' || cancelled) {
+        return cancelledResult('verifying');
+      }
+
+      const probe = probeOutcome.result;
+
+      if (probe.spawnError || probe.exitCode !== 0) {
+        return syncFailure(EXPORT_MESSAGES.syncCheck.probeFailed, probe.stderrTail);
+      }
+
+      const report = evaluateExportSync(parseFfprobeJson(probeStdout), plan.expected);
+
+      if (!report.passed) {
+        return syncFailure(
+          exportSyncFailureMessage(report),
+          exportSyncIssueDetail(report) ?? probeStdout.slice(0, 512),
+        );
+      }
+
+      // 取消可能落在自检与提交之间；取消永不提交。
+      if (cancelled) {
+        return cancelledResult('verifying');
+      }
+
       currentPhase = 'committing';
       options.onPhase?.('committing');
 
@@ -229,7 +280,7 @@ export function startExportJob(options: ExportJobOptions): ExportJobHandle {
         return failure(EXPORT_MESSAGES.commitFailed, render.stderrTail);
       }
 
-      return { ok: true, outputPath: plan.targetPath };
+      return { ok: true, outputPath: plan.targetPath, sync: report };
     } finally {
       // 预混音轨、字幕/字体与未提交的临时成品无论成败都要清理。
       // 成功提交后 temporaryPath 已 rename 成成品，这里的删除是 no-op。

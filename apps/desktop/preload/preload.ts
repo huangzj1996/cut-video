@@ -79,6 +79,7 @@ const api: MiaomaApi = {
     getDefaultTarget: (projectId) => invoke(IPC_CHANNELS.export.defaultTarget, projectId),
     chooseTarget: (projectId) => invoke(IPC_CHANNELS.export.chooseTarget, projectId),
     start: (input) => invoke(IPC_CHANNELS.export.start, input),
+    cancel: (runId) => invoke(IPC_CHANNELS.export.cancel, runId),
     reveal: (runId) => invoke(IPC_CHANNELS.export.reveal, runId),
     onProgress: (listener) => subscribe(IPC_EVENT_CHANNELS.exportProgress, listener),
     onState: (listener) => subscribe(IPC_EVENT_CHANNELS.exportState, listener),

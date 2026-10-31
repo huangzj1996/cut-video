@@ -1,41 +1,36 @@
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ExportErrorInfo, ExportPhase } from '../../shared/ipc-contract';
+import { exportTempArtifactsFromPlan, removeExportTempArtifacts } from './artifacts';
 import type { ExportPlan } from './plan';
-import type { ExportProcessRunner } from './runner';
+import { createRenderProgressParser, type RenderProgressSample } from './progress';
+import type { ExportProcessHandle, ExportProcessResult, ExportProcessRunner } from './runner';
+
+/** 取消时先请 ffmpeg 优雅退出，最多等这么久再强杀进程树。 */
+export const EXPORT_CANCEL_GRACE_MS = 3_000;
 
 export interface ExportJobOptions {
   onPhase?: (phase: ExportPhase) => void;
+  /** 渲染阶段的真实进度样本；mixing/committing 等阶段不会回调。 */
+  onProgress?: (sample: RenderProgressSample) => void;
   plan: ExportPlan;
   runner: ExportProcessRunner;
 }
 
 export type ExportJobResult =
-  { ok: true; outputPath: string } | { error: ExportErrorInfo; ok: false };
+  | { cancelled: true; ok: false; phase: ExportPhase }
+  | { error: ExportErrorInfo; ok: false }
+  | { ok: true; outputPath: string };
 
-function removeQuietly(filePath: string): void {
-  try {
-    rmSync(filePath, { force: true });
-  } catch {
-    // 清理失败不能掩盖导出本身的失败原因。
-  }
+export interface ExportJobHandle {
+  /** 请求取消；重复调用是 no-op。任务会等到当前进程退出并清理完临时产物后才收束。 */
+  cancel(): void;
+  /** 任务结束（成功、失败或取消）时 resolve。 */
+  readonly result: Promise<ExportJobResult>;
 }
 
-function removeDirectoryQuietly(directory: string): void {
-  try {
-    rmSync(directory, { force: true, maxRetries: 3, recursive: true });
-  } catch {
-    // 同上：临时字体目录清理失败只影响磁盘，不影响导出结果。
-  }
-}
+/** 单个阶段的结果：进程真正退出，或在启动前/启动时已被取消。 */
+type PhaseOutcome = { status: 'cancelled' } | { status: 'exited'; result: ExportProcessResult };
 
 function fileSize(filePath: string): number {
   try {
@@ -46,8 +41,18 @@ function fileSize(filePath: string): number {
   }
 }
 
-function failure(message: string): ExportJobResult {
-  return { error: { code: 'EXPORT_RENDER_FAILED', message }, ok: false };
+/** 失败原因保留 stderr 尾部，供“查看失败详情”在本次会话内展开。 */
+function failure(message: string, stderrTail: string): ExportJobResult {
+  const detail = stderrTail.trim();
+
+  return {
+    error: { code: 'EXPORT_RENDER_FAILED', message, ...(detail.length > 0 ? { detail } : {}) },
+    ok: false,
+  };
+}
+
+function cancelledResult(phase: ExportPhase): ExportJobResult {
+  return { cancelled: true, ok: false, phase };
 }
 
 /**
@@ -62,7 +67,7 @@ function prepareSubtitleArtifacts(plan: ExportPlan): ExportErrorInfo | null {
   try {
     writeFileSync(plan.subtitles.assPath, plan.subtitles.assText, 'utf8');
   } catch {
-    return { code: 'EXPORT_RENDER_FAILED', message: '无法写入字幕临时文件，导出未开始。' };
+    return { code: 'EXPORT_RENDER_FAILED', message: '无法写入字幕临时产物，导出未开始。' };
   }
 
   try {
@@ -78,84 +83,158 @@ function prepareSubtitleArtifacts(plan: ExportPlan): ExportErrorInfo | null {
   return null;
 }
 
-/** 字幕属于临时产物：无论成功、失败还是取消都要清掉。 */
-function cleanupSubtitleArtifacts(plan: ExportPlan): void {
-  if (!plan.subtitles) {
-    return;
-  }
-
-  removeQuietly(plan.subtitles.assPath);
-  removeDirectoryQuietly(plan.subtitles.fontsDirPath);
-}
-
 /**
- * 执行一次两段式导出：先预混音轨，再单遍视频编码并封装，成功且产物有效才提交。
- * 预混音轨、临时成品与字幕/字体产物都是临时产物：成功、失败、取消都要清理；
- * 任何失败都不提交，保证“成功”只有一种含义。
+ * 执行一次两段式导出，并允许在任一阶段取消。
+ *
+ * 取消语义：先向当前 ffmpeg 的 stdin 写 q 请求优雅退出，最多等
+ * EXPORT_CANCEL_GRACE_MS；超时用 taskkill /T /F 结束进程树。无论哪种方式，
+ * 任务都会等进程真正退出后删掉临时产物，并且永不提交。
+ *
+ * 成功判定不依赖 progress=end，也不只看退出码：取消标记、退出码、预混音轨
+ * 与临时成品是否真实产出，三者同时满足才会提交。
  */
-export async function runExportJob(options: ExportJobOptions): Promise<ExportJobResult> {
+export function startExportJob(options: ExportJobOptions): ExportJobHandle {
   const { plan, runner } = options;
-  let committed = false;
+  const artifacts = exportTempArtifactsFromPlan(plan);
+  let cancelled = false;
+  let active: ExportProcessHandle | null = null;
+  let killTimer: ReturnType<typeof setTimeout> | null = null;
+  let currentPhase: ExportPhase = 'preparing';
 
-  removeQuietly(plan.temporaryPath);
-  removeQuietly(plan.premixTemporaryPath);
+  const clearKillTimer = (): void => {
+    if (killTimer !== null) {
+      clearTimeout(killTimer);
+      killTimer = null;
+    }
+  };
 
-  try {
-    const prepareError = prepareSubtitleArtifacts(plan);
+  const requestQuit = (handle: ExportProcessHandle): void => {
+    clearKillTimer();
+    handle.requestQuit();
+    killTimer = setTimeout(() => {
+      killTimer = null;
+      handle.killTree();
+    }, EXPORT_CANCEL_GRACE_MS);
+  };
 
-    if (prepareError) {
-      return { error: prepareError, ok: false };
+  const cancel = (): void => {
+    if (cancelled) {
+      return;
     }
 
-    options.onPhase?.('mixing');
+    cancelled = true;
 
-    const premixResult = await runner({
-      args: plan.premix.args,
-      command: plan.premix.command,
+    if (active) {
+      requestQuit(active);
+    }
+  };
+
+  const runPhase = async (
+    phase: ExportPhase,
+    command: { args: string[]; command: string },
+    onStdoutChunk?: (chunk: string) => void,
+  ): Promise<PhaseOutcome> => {
+    if (cancelled) {
+      return { status: 'cancelled' };
+    }
+
+    currentPhase = phase;
+    options.onPhase?.(phase);
+
+    const handle = runner({
+      args: command.args,
+      command: command.command,
       cwd: plan.cwd,
+      ...(onStdoutChunk ? { onStdoutChunk } : {}),
     });
 
-    if (premixResult.spawnError || premixResult.exitCode !== 0) {
-      return failure('预混音轨失败，导出未完成。');
+    active = handle;
+
+    if (cancelled) {
+      requestQuit(handle);
     }
-
-    if (fileSize(plan.premixTemporaryPath) <= 0) {
-      return failure('预混音轨没有产出有效音轨，导出未完成。');
-    }
-
-    options.onPhase?.('rendering');
-
-    const processResult = await runner({
-      args: plan.render.args,
-      command: plan.render.command,
-      cwd: plan.cwd,
-    });
-
-    if (processResult.spawnError || processResult.exitCode !== 0) {
-      return failure('渲染进程失败，导出未完成。');
-    }
-
-    if (fileSize(plan.temporaryPath) <= 0) {
-      return failure('渲染没有产出有效文件，导出未完成。');
-    }
-
-    options.onPhase?.('committing');
 
     try {
-      renameSync(plan.temporaryPath, plan.targetPath);
-    } catch {
-      return failure('无法提交导出成品，请检查保存位置。');
+      return { result: await handle.exited, status: 'exited' };
+    } finally {
+      clearKillTimer();
+      active = null;
     }
+  };
 
-    committed = true;
-    return { ok: true, outputPath: plan.targetPath };
-  } finally {
-    // 预混音轨与字幕/字体无论成败都要清理；未提交的临时成品同理。
-    removeQuietly(plan.premixTemporaryPath);
-    cleanupSubtitleArtifacts(plan);
+  const result = (async (): Promise<ExportJobResult> => {
+    // 先清掉上一次异常中断可能留下的同名临时产物，再开始本次导出。
+    removeExportTempArtifacts(artifacts);
 
-    if (!committed) {
-      removeQuietly(plan.temporaryPath);
+    try {
+      const prepareError = prepareSubtitleArtifacts(plan);
+
+      if (prepareError) {
+        return { error: prepareError, ok: false };
+      }
+
+      if (cancelled) {
+        return cancelledResult(currentPhase);
+      }
+
+      const premixOutcome = await runPhase('mixing', plan.premix);
+
+      if (premixOutcome.status === 'cancelled' || cancelled) {
+        return cancelledResult('mixing');
+      }
+
+      const premix = premixOutcome.result;
+
+      if (premix.spawnError || premix.exitCode !== 0) {
+        return failure('预混音轨失败，导出未完成。', premix.stderrTail);
+      }
+
+      if (fileSize(plan.premixTemporaryPath) <= 0) {
+        return failure('预混音轨没有产出有效音轨，导出未完成。', premix.stderrTail);
+      }
+
+      const parser = createRenderProgressParser();
+      const renderOutcome = await runPhase('rendering', plan.render, (chunk) => {
+        for (const sample of parser.push(chunk)) {
+          options.onProgress?.(sample);
+        }
+      });
+
+      if (renderOutcome.status === 'cancelled' || cancelled) {
+        return cancelledResult('rendering');
+      }
+
+      const render = renderOutcome.result;
+
+      if (render.spawnError || render.exitCode !== 0) {
+        return failure('渲染进程失败，导出未完成。', render.stderrTail);
+      }
+
+      if (fileSize(plan.temporaryPath) <= 0) {
+        return failure('渲染没有产出有效文件，导出未完成。', render.stderrTail);
+      }
+
+      // 取消可能发生在渲染退出与提交之间；取消永不提交。
+      if (cancelled) {
+        return cancelledResult('rendering');
+      }
+
+      currentPhase = 'committing';
+      options.onPhase?.('committing');
+
+      try {
+        renameSync(plan.temporaryPath, plan.targetPath);
+      } catch {
+        return failure('无法提交导出成品，请检查保存位置。', render.stderrTail);
+      }
+
+      return { ok: true, outputPath: plan.targetPath };
+    } finally {
+      // 预混音轨、字幕/字体与未提交的临时成品无论成败都要清理。
+      // 成功提交后 temporaryPath 已 rename 成成品，这里的删除是 no-op。
+      removeExportTempArtifacts(artifacts);
     }
-  }
+  })();
+
+  return { cancel, result };
 }

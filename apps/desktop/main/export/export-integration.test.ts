@@ -12,9 +12,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { probeVideo } from '@miaoma/video-agent';
-import type { ExportState } from '../../shared/ipc-contract';
+import type { VideoProject } from '@miaoma/video-project';
+import type { ExportProgress, ExportState } from '../../shared/ipc-contract';
 import { ProjectStore } from '../projects/project-store';
 import { compileExportPlan } from './plan';
+import { runExportProcess } from './runner';
 import { ExportService } from './service';
 import { createExportFixture } from './test-support/fixture';
 
@@ -352,13 +354,15 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
     mkdirSync(outputDirectory);
     const targetPath = path.join(outputDirectory, '集成成片.mp4');
     const states: ExportState[] = [];
+    const progress: ExportProgress[] = [];
     const service = new ExportService({
+      exportTempRoot: path.join(root, 'temp'),
       getExportFonts: () => FONTS,
       getProjectStore: () => store,
       getSettings: () => ({ defaultProjectDirectory: root }),
       getWorkflowStatus: () => null,
       media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG }),
-      onProgress: () => undefined,
+      onProgress: (event) => progress.push(event),
       onState: (state) => states.push(state),
     });
 
@@ -368,6 +372,22 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
       targetPath,
     });
     await service.whenIdle();
+
+    // 真实渲染必须产生来自 ffmpeg 的进度：百分比单调、收尾接近 100，ETA 最终可估算。
+    const rendered = progress.filter(
+      (event) => event.phase === 'rendering' && event.percent !== null,
+    );
+    const percentages = rendered.map((event) => event.percent ?? 0);
+
+    expect(percentages.length).toBeGreaterThan(0);
+    expect(percentages.at(-1)).toBeGreaterThanOrEqual(90);
+    expect(percentages.every((value) => value >= 0 && value <= 100)).toBe(true);
+
+    for (let index = 1; index < percentages.length; index += 1) {
+      expect(percentages[index] ?? 0).toBeGreaterThanOrEqual(percentages[index - 1] ?? 0);
+    }
+
+    expect(rendered.some((event) => event.etaMs !== null)).toBe(true);
 
     expect(states.at(-1)).toMatchObject({ outputPath: targetPath, status: 'succeeded' });
     expect(existsSync(targetPath)).toBe(true);
@@ -418,6 +438,129 @@ describe.skipIf(!HAS_FFMPEG)('export integration', () => {
     expect(lastRed.b).toBeLessThan(100);
     expect(firstBlue.b).toBeGreaterThan(150);
     expect(firstBlue.r).toBeLessThan(100);
+  }, 120_000);
+
+  it('cancels a real render without committing and cleans every temp artifact', async () => {
+    const root = tempRoot();
+    const temp = path.join(root, 'temp');
+    mkdirSync(temp, { recursive: true });
+    const media = path.join(root, 'media');
+    mkdirSync(media);
+    const first = path.join(media, 'red.mp4');
+    const second = path.join(media, 'blue.mp4');
+    const voice = path.join(media, 'voice.wav');
+    generateClip(first, 'red');
+    generateClip(second, 'blue');
+    generateTone(voice, VOICE_FREQUENCY, 4);
+
+    const store = new ProjectStore(path.join(root, 'projects'));
+    const created = store.create({ name: '取消导出' });
+    const projectId = created.project.projectId;
+    const base = createExportFixture({ audioPath: voice, videoPaths: [first, second] });
+    const fixture: VideoProject = {
+      ...base,
+      assets: {
+        ...base.assets,
+        voices: base.assets.voices.map((asset) => ({ ...asset, durationMs: 4_000 })),
+      },
+      scenes: base.scenes.map((scene) => ({ ...scene, durationMs: 3_000 })),
+      tracks: base.tracks.map((track) => {
+        if (track.kind === 'video') {
+          return {
+            ...track,
+            clips: track.clips.map((clip, index) => ({
+              ...clip,
+              endMs: (index + 1) * 3_000,
+              sourceEndMs: 3_000,
+              startMs: index * 3_000,
+            })),
+          };
+        }
+
+        if (track.kind === 'voice') {
+          return {
+            ...track,
+            clips: track.clips.map((clip, index) => ({
+              ...clip,
+              endMs: (index + 1) * 3_000,
+              startMs: index * 3_000,
+            })),
+          };
+        }
+
+        return track;
+      }),
+    };
+    const saved = store.update({
+      expectedRevision: 0,
+      projectId,
+      project: { ...fixture, project: { ...fixture.project, name: '取消导出', projectId } },
+    });
+    const outputDirectory = path.join(root, '导出');
+    mkdirSync(outputDirectory);
+    const targetPath = path.join(outputDirectory, '取消成片.mp4');
+    const states: ExportState[] = [];
+    const runnerCalls = { kill: 0, quit: 0 };
+    let runId = '';
+    let cancelRequested = false;
+    const service = new ExportService({
+      createRunner: () => (request) => {
+        const handle = runExportProcess(request);
+
+        // 包一层真实运行器，验证取消确实先写 q（优雅退出），而不是直接强杀。
+        return {
+          ...handle,
+          killTree: () => {
+            runnerCalls.kill += 1;
+            handle.killTree();
+          },
+          requestQuit: () => {
+            runnerCalls.quit += 1;
+            handle.requestQuit();
+          },
+        };
+      },
+      exportTempRoot: temp,
+      getExportFonts: () => FONTS,
+      getProjectStore: () => store,
+      getSettings: () => ({ defaultProjectDirectory: root }),
+      getWorkflowStatus: () => null,
+      media: () => ({ ffmpegAvailable: true, ffmpegPath: FFMPEG }),
+      onProgress: (event) => {
+        // 第一条真实进度到达后取消，覆盖“渲染阶段取消”的真实链路。
+        if (
+          !cancelRequested &&
+          runId !== '' &&
+          event.phase === 'rendering' &&
+          event.percent !== null
+        ) {
+          cancelRequested = true;
+          service.cancel(runId);
+        }
+      },
+      onState: (state) => states.push(state),
+    });
+
+    const started = await service.start({
+      expectedRevision: saved.project.contentRevision,
+      projectId,
+      targetPath,
+    });
+    runId = started.runId;
+    await service.whenIdle();
+
+    expect(cancelRequested).toBe(true);
+    // 真实 ffmpeg 收到 stdin 的 q 后应在 3 秒内退出，不需要强杀进程树。
+    expect(runnerCalls.quit).toBeGreaterThanOrEqual(1);
+    expect(runnerCalls.kill).toBe(0);
+    expect(states.at(-1)).toMatchObject({ phase: 'rendering', status: 'cancelled' });
+    expect(existsSync(targetPath)).toBe(false);
+    expect(existsSync(targetPath + '.partial')).toBe(false);
+    expect(existsSync(targetPath + '.partial.wav')).toBe(false);
+    expect(
+      readdirSync(outputDirectory).filter((name) => name.startsWith('.miaoma-export-')),
+    ).toEqual([]);
+    expect(readdirSync(path.join(temp, 'miaoma-export-workspaces'))).toEqual([]);
   }, 120_000);
 
   it('applies voice speed, non-loop music trim and per-clip volumes in the real premix command', () => {

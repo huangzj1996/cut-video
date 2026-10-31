@@ -120,12 +120,14 @@ export interface ExportProgress {
 }
 
 export interface ExportState {
+  /** 失败与取消都带原因；取消时 code 是 EXPORT_CANCELLED。 */
   error?: ExportErrorInfo;
   outputPath?: string;
   phase: ExportPhase;
   projectId: string;
   runId: string;
-  status: 'failed' | 'running' | 'succeeded';
+  /** cancelled 表示用户取消且临时产物已清理；取消后可以立即重新导出。 */
+  status: 'cancelled' | 'failed' | 'running' | 'succeeded';
   targetPath: string;
 }
 
@@ -471,6 +473,11 @@ export interface IpcInvokeContract {
     params: [runId: string];
     result: null;
   };
+  /** 取消进行中的导出；任务不存在或已结束时是 no-op。 */
+  'export:cancel': {
+    params: [runId: string];
+    result: null;
+  };
 }
 
 export type IpcChannel = keyof IpcInvokeContract;
@@ -515,6 +522,7 @@ export const IPC_CHANNELS = {
     flushComplete: 'editor:flush-complete' satisfies IpcChannel,
   },
   export: {
+    cancel: 'export:cancel' satisfies IpcChannel,
     chooseTarget: 'export:choose-target' satisfies IpcChannel,
     defaultTarget: 'export:default-target' satisfies IpcChannel,
     reveal: 'export:reveal' satisfies IpcChannel,
@@ -586,11 +594,12 @@ export interface MiaomaWorkflowApi {
   onEvent(listener: (event: RunEvent) => void): () => void;
 }
 
-/** 导出任务：发起、选择目标、订阅状态；渲染进程不直接启动进程。 */
+/** 导出任务：发起、取消、选择目标、订阅状态；渲染进程不直接启动进程。 */
 export interface MiaomaExportApi {
   getDefaultTarget(projectId: string): Promise<IpcResponse<IpcResult<'export:default-target'>>>;
   chooseTarget(projectId: string): Promise<IpcResponse<IpcResult<'export:choose-target'>>>;
   start(input: ExportStartInput): Promise<IpcResponse<IpcResult<'export:start'>>>;
+  cancel(runId: string): Promise<IpcResponse<IpcResult<'export:cancel'>>>;
   reveal(runId: string): Promise<IpcResponse<IpcResult<'export:reveal'>>>;
   onProgress(listener: (event: ExportProgress) => void): () => void;
   onState(listener: (state: ExportState) => void): () => void;

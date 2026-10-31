@@ -32,8 +32,10 @@ import {
 import { ChatService } from './chat/chat-service';
 import { ChatStore } from './chat/chat-store';
 import { CloseFlushCoordinator } from './editor/close-flush';
+import { closeWindowWithExport } from './export/close-window';
 import { resolveExportFonts } from './export/fonts';
 import { ExportService } from './export/service';
+import { cleanupStaleExportWorkspaces, resolveExportWorkspaceRoot } from './export/temp-workspace';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { assertProjectId } from './ipc-args';
 import { registerAssetProtocol, registerAssetScheme } from './media/asset-protocol-handler';
@@ -261,6 +263,7 @@ function getExportService(): ExportService {
   }
 
   exportService = new ExportService({
+    exportTempRoot: app.getPath('temp'),
     getExportFonts: () =>
       resolveExportFonts({
         appPath: app.getAppPath(),
@@ -435,6 +438,9 @@ function registerIpcHandlers(): void {
   });
 
   handle(IPC_CHANNELS.export.start, (input) => getExportService().start(input));
+
+  // 取消进行中的导出：先优雅退出，超时强杀；任务不存在/已结束时是 no-op。
+  handle(IPC_CHANNELS.export.cancel, (runId) => getExportService().cancel(runId));
 
   handle(IPC_CHANNELS.export.reveal, (runId) => {
     const outputPath = getExportService().getOutputPath(runId);
@@ -649,6 +655,7 @@ function createWindow(): void {
   });
 
   activeCloseFlush = closeFlush;
+  let closing = false;
 
   mainWindow.on('close', (event) => {
     if (mainWindow.isDestroyed()) {
@@ -657,10 +664,38 @@ function createWindow(): void {
 
     event.preventDefault();
 
-    void closeFlush.begin().then(() => {
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.destroy();
-      }
+    // 已经有一次关窗流程在跑：忽略重复的 close（例如连点关闭按钮）。
+    if (closing) {
+      return;
+    }
+
+    closing = true;
+
+    void closeWindowWithExport({
+      confirmStopExport: async () => {
+        const result = await dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          buttons: ['继续导出', '取消导出并关闭'],
+          defaultId: 0,
+          cancelId: 0,
+          title: '导出正在进行中',
+          message: '当前正在导出视频，关闭窗口会取消本次导出。',
+          detail: '取消导出会在关闭前清理临时产物，不会提交成品。',
+        });
+
+        return result.response === 1;
+      },
+      destroy: () => {
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.destroy();
+        }
+      },
+      exportActive: () => exportService?.hasActive() ?? false,
+      requestCancel: () => exportService?.cancelActive(),
+      waitForExport: () => exportService?.whenIdle() ?? Promise.resolve(),
+      waitForFlush: () => closeFlush.begin(),
+    }).finally(() => {
+      closing = false;
     });
   });
 
@@ -685,8 +720,21 @@ function createWindow(): void {
   }
 }
 
+/** 上次异常退出可能留下导出临时产物；启动时按“所有者已退出/已过期”回收。 */
+function cleanupStaleExportArtifacts(): void {
+  try {
+    cleanupStaleExportWorkspaces({
+      now: Date.now(),
+      root: resolveExportWorkspaceRoot(app.getPath('temp')),
+    });
+  } catch {
+    // 清理失败只影响磁盘占用，不能阻止应用启动。
+  }
+}
+
 void app.whenReady().then(() => {
   loadDevelopmentEnv();
+  cleanupStaleExportArtifacts();
   Menu.setApplicationMenu(null);
   registerIpcHandlers();
   registerAssetProtocol((projectId) =>

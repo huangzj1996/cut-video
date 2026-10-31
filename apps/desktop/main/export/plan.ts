@@ -79,7 +79,7 @@ export interface ExportPlan {
   expected: ExportExpectedOutput;
   /** 第一段：把配音与音乐混成一条与时间线等长的预混音轨。 */
   premix: ExportFfmpegCommand;
-  /** 预混音轨的临时文件；成功、失败、取消都必须由任务清理。 */
+  /** 预混音轨的临时产物；成功、失败、取消都必须由任务清理。 */
   premixTemporaryPath: string;
   /** 第二段：单遍视频编码并从预混音轨封装 AAC。 */
   render: ExportFfmpegCommand;
@@ -463,6 +463,10 @@ function buildVideoCommand(input: {
   const args = [
     '-y',
     '-hide_banner',
+    // 进度走 stdout 的 key=value 块，供导出任务解析真实百分比与速度；stderr 只留诊断。
+    '-progress',
+    'pipe:1',
+    '-nostats',
     ...inputs,
     '-i',
     premixTemporaryPath,
@@ -521,7 +525,7 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
   const temporaryPath = partialPathFor(targetPath);
   const premixTemporaryPath = premixPartialPathFor(targetPath);
   const premix = buildPremixGraph({ project, totalDurationMs, totalSamples });
-  // 预混音轨写成无损 PCM 临时文件，最终封装时才编码 AAC，避免中间再压一次。
+  // 预混音轨写成无损 PCM 临时产物，最终封装时才编码 AAC，避免中间再压一次。
   const premixArgs = [
     '-y',
     '-hide_banner',

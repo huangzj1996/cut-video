@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runExportJob } from './job';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EXPORT_CANCEL_GRACE_MS, startExportJob } from './job';
 import { compileExportPlan, type ExportPlan } from './plan';
-import type { ExportProcessRunner } from './runner';
+import type { ExportProcessRequest, ExportProcessRunner } from './runner';
+import { createFakeProcess, okProcess, type FakeProcess } from './test-support/fake-process';
 import { createExportFixture } from './test-support/fixture';
 
 let root: string;
@@ -22,10 +23,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   rmSync(root, { force: true, recursive: true });
 });
 
-function writeLastArg(request: { args: string[] }): void {
+function writeLastArg(request: ExportProcessRequest): void {
   const outputPath = request.args.at(-1);
 
   if (outputPath) {
@@ -33,25 +35,34 @@ function writeLastArg(request: { args: string[] }): void {
   }
 }
 
-function isPremixRequest(request: { args: string[] }): boolean {
-  return request.args.at(-1) === plan.premixTemporaryPath;
+function isPremixRequest(request: ExportProcessRequest): boolean {
+  return request.args === plan.premix.args;
+}
+
+function requireProcess(value: FakeProcess | null): FakeProcess {
+  if (value === null) {
+    throw new Error('渲染进程应该已经启动');
+  }
+
+  return value;
 }
 
 describe('export job', () => {
   it('premixes audio, renders video and commits only after both phases succeed', async () => {
     const phases: string[] = [];
     const received: string[][] = [];
-    const runner: ExportProcessRunner = async (request) => {
+    const runner: ExportProcessRunner = (request) => {
       received.push(request.args);
       writeLastArg(request);
-      return { exitCode: 0, stderrTail: '' };
+
+      return createFakeProcess({ autoExit: okProcess() });
     };
 
-    const result = await runExportJob({
+    const result = await startExportJob({
       onPhase: (phase) => phases.push(phase),
       plan,
       runner,
-    });
+    }).result;
 
     expect(result).toEqual({ ok: true, outputPath: plan.targetPath });
     expect(phases).toEqual(['mixing', 'rendering', 'committing']);
@@ -63,19 +74,22 @@ describe('export job', () => {
 
   it('does not render video when the premix fails and cleans every temp artifact', async () => {
     const received: string[][] = [];
-    const runner: ExportProcessRunner = async (request) => {
+    const runner: ExportProcessRunner = (request) => {
       received.push(request.args);
       writeLastArg(request);
-      return { exitCode: 1, stderrTail: 'premix boom' };
+
+      return createFakeProcess({ autoExit: { exitCode: 1, stderrTail: 'premix boom' } });
     };
 
-    const result = await runExportJob({ plan, runner });
+    const result = await startExportJob({ plan, runner }).result;
 
     expect(result.ok).toBe(false);
-    expect(result.ok ? null : result.error.code).toBe('EXPORT_RENDER_FAILED');
-    expect(result.ok ? null : result.error.message).toContain('预混音轨');
+    expect(result.ok ? null : 'error' in result ? result.error.message : '').toContain('预混音轨');
+    expect(result.ok ? null : 'error' in result ? result.error.detail : '').toContain(
+      'premix boom',
+    );
     expect(received).toHaveLength(1);
-    expect(isPremixRequest({ args: received[0] ?? [] })).toBe(true);
+    expect(isPremixRequest({ args: received[0] ?? [] } as ExportProcessRequest)).toBe(true);
     expect(existsSync(plan.targetPath)).toBe(false);
     expect(existsSync(plan.premixTemporaryPath)).toBe(false);
     expect(existsSync(plan.temporaryPath)).toBe(false);
@@ -83,12 +97,15 @@ describe('export job', () => {
 
   it('treats a premix spawn error as a failure without touching the video phase', async () => {
     let calls = 0;
-    const runner: ExportProcessRunner = async () => {
+    const runner: ExportProcessRunner = () => {
       calls += 1;
-      return { exitCode: null, spawnError: 'ENOENT', stderrTail: '' };
+
+      return createFakeProcess({
+        autoExit: { exitCode: null, spawnError: 'ENOENT', stderrTail: '' },
+      });
     };
 
-    const result = await runExportJob({ plan, runner });
+    const result = await startExportJob({ plan, runner }).result;
 
     expect(result.ok).toBe(false);
     expect(calls).toBe(1);
@@ -96,44 +113,231 @@ describe('export job', () => {
   });
 
   it('rejects a zero exit code without a premix file', async () => {
-    const runner: ExportProcessRunner = async () => ({ exitCode: 0, stderrTail: '' });
+    const runner: ExportProcessRunner = () => createFakeProcess({ autoExit: okProcess() });
 
-    const result = await runExportJob({ plan, runner });
+    const result = await startExportJob({ plan, runner }).result;
 
     expect(result.ok).toBe(false);
-    expect(result.ok ? null : result.error.message).toContain('预混音轨');
+    expect(result.ok ? null : 'error' in result ? result.error.message : '').toContain('预混音轨');
     expect(existsSync(plan.temporaryPath)).toBe(false);
   });
 
-  it('does not commit when rendering fails after a successful premix and cleans both artifacts', async () => {
-    const runner: ExportProcessRunner = async (request) => {
+  it('does not commit when rendering fails after a successful premix and keeps the stderr tail', async () => {
+    const runner: ExportProcessRunner = (request) => {
       writeLastArg(request);
 
-      return isPremixRequest(request)
-        ? { exitCode: 0, stderrTail: '' }
-        : { exitCode: 1, stderrTail: 'render boom' };
+      return createFakeProcess({
+        autoExit: isPremixRequest(request)
+          ? okProcess()
+          : { exitCode: 1, stderrTail: 'render boom' },
+      });
     };
 
-    const result = await runExportJob({ plan, runner });
+    const result = await startExportJob({ plan, runner }).result;
 
     expect(result.ok).toBe(false);
-    expect(result.ok ? null : result.error.code).toBe('EXPORT_RENDER_FAILED');
+    const error = result.ok ? null : 'error' in result ? result.error : null;
+    expect(error?.code).toBe('EXPORT_RENDER_FAILED');
+    expect(error?.detail).toContain('render boom');
     expect(existsSync(plan.targetPath)).toBe(false);
     expect(existsSync(plan.premixTemporaryPath)).toBe(false);
     expect(existsSync(plan.temporaryPath)).toBe(false);
   });
 
   it('rejects exit code 0 without a usable output file', async () => {
-    const runner: ExportProcessRunner = async (request) =>
-      isPremixRequest(request)
-        ? (writeLastArg(request), { exitCode: 0, stderrTail: '' })
-        : { exitCode: 0, stderrTail: '' };
+    const runner: ExportProcessRunner = (request) =>
+      createFakeProcess({
+        autoExit: isPremixRequest(request) ? (writeLastArg(request), okProcess()) : okProcess(),
+      });
 
-    const result = await runExportJob({ plan, runner });
+    const result = await startExportJob({ plan, runner }).result;
 
     expect(result.ok).toBe(false);
-    expect(result.ok ? null : result.error.code).toBe('EXPORT_RENDER_FAILED');
+    expect(result.ok ? null : 'error' in result ? result.error.code : '').toBe(
+      'EXPORT_RENDER_FAILED',
+    );
     expect(existsSync(plan.targetPath)).toBe(false);
+  });
+});
+
+describe('export job progress', () => {
+  it('forwards parsed rendering samples and never reports premix progress', async () => {
+    const samples: { outTimeMs: number; speed: number | null }[] = [];
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (!isPremixRequest(request)) {
+        request.onStdoutChunk?.('out_time_us=500000\nspeed=2.0x\nprogress=continue\n');
+        request.onStdoutChunk?.('out_time_us=1500000\nspeed=2.5x\nprogress=end\n');
+      }
+
+      return createFakeProcess({ autoExit: okProcess() });
+    };
+
+    const result = await startExportJob({
+      onProgress: (sample) => samples.push(sample),
+      plan,
+      runner,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(samples).toEqual([
+      { outTimeMs: 500, speed: 2 },
+      { outTimeMs: 1_500, speed: 2.5 },
+    ]);
+  });
+});
+
+describe('export job cancellation', () => {
+  it('cancels during premix by asking the process to quit and never rendering or committing', async () => {
+    const quits: string[] = [];
+    let renderStarted = false;
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (!isPremixRequest(request)) {
+        renderStarted = true;
+
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      return createFakeProcess({
+        exitOnQuit: okProcess(),
+        onQuit: () => quits.push('premix'),
+      });
+    };
+
+    const job = startExportJob({ plan, runner });
+    job.cancel();
+    const result = await job.result;
+
+    expect(result).toEqual({ cancelled: true, ok: false, phase: 'mixing' });
+    expect(quits).toEqual(['premix']);
+    expect(renderStarted).toBe(false);
+    expect(existsSync(plan.targetPath)).toBe(false);
+    expect(existsSync(plan.premixTemporaryPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+  });
+
+  it('cancels during rendering with a graceful quit and removes every temp artifact', async () => {
+    let renderProcess: FakeProcess | null = null;
+    let markRenderStarted: () => void = () => undefined;
+    const renderStarted = new Promise<void>((resolve) => {
+      markRenderStarted = resolve;
+    });
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (isPremixRequest(request)) {
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      renderProcess = createFakeProcess({ exitOnQuit: { exitCode: 0, stderrTail: '' } });
+      markRenderStarted();
+
+      return renderProcess;
+    };
+
+    const job = startExportJob({ plan, runner });
+    await renderStarted;
+    job.cancel();
+    const result = await job.result;
+
+    expect(result).toEqual({ cancelled: true, ok: false, phase: 'rendering' });
+    expect(requireProcess(renderProcess).quitCount).toBe(1);
+    expect(requireProcess(renderProcess).killCount).toBe(0);
+    expect(existsSync(plan.targetPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+    expect(existsSync(plan.premixTemporaryPath)).toBe(false);
+  });
+
+  it('force-kills the process tree after the three second grace period', async () => {
+    vi.useFakeTimers();
+    let renderProcess: FakeProcess | null = null;
+    let markRenderStarted: () => void = () => undefined;
+    const renderStarted = new Promise<void>((resolve) => {
+      markRenderStarted = resolve;
+    });
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (isPremixRequest(request)) {
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      renderProcess = createFakeProcess();
+      markRenderStarted();
+
+      return renderProcess;
+    };
+
+    const job = startExportJob({ plan, runner });
+    await renderStarted;
+    job.cancel();
+
+    expect(requireProcess(renderProcess).killCount).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(EXPORT_CANCEL_GRACE_MS);
+
+    expect(requireProcess(renderProcess).killCount).toBe(1);
+    requireProcess(renderProcess).resolve({ exitCode: null, stderrTail: '' });
+    const result = await job.result;
+
+    expect(result).toEqual({ cancelled: true, ok: false, phase: 'rendering' });
+    expect(existsSync(plan.targetPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+  });
+
+  it('does not commit when cancellation lands between render exit and commit', async () => {
+    let renderProcess: FakeProcess | null = null;
+    let markRenderStarted: () => void = () => undefined;
+    const renderStarted = new Promise<void>((resolve) => {
+      markRenderStarted = resolve;
+    });
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (isPremixRequest(request)) {
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      renderProcess = createFakeProcess();
+      markRenderStarted();
+
+      return renderProcess;
+    };
+
+    const job = startExportJob({ plan, runner });
+    await renderStarted;
+    requireProcess(renderProcess).resolve(okProcess());
+    // 在渲染退出后的 continuation 之前同步请求取消：提交前必须看到取消标记。
+    job.cancel();
+    const result = await job.result;
+
+    expect(result).toEqual({ cancelled: true, ok: false, phase: 'rendering' });
+    expect(existsSync(plan.targetPath)).toBe(false);
+    expect(existsSync(plan.temporaryPath)).toBe(false);
+  });
+
+  it('ignores cancellation after the export already succeeded', async () => {
+    let quits = 0;
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+      const fake = createFakeProcess({ autoExit: okProcess() });
+      fake.requestQuit = () => {
+        quits += 1;
+      };
+
+      return fake;
+    };
+
+    const job = startExportJob({ plan, runner });
+    const result = await job.result;
+    job.cancel();
+
+    expect(result.ok).toBe(true);
+    expect(quits).toBe(0);
+    expect(existsSync(plan.targetPath)).toBe(true);
   });
 });
 
@@ -167,7 +371,7 @@ describe('export job subtitle artifacts', () => {
     let observed:
       | { assExists: boolean; assText: string; cwd: string | undefined; fontExists: boolean }
       | undefined;
-    const runner: ExportProcessRunner = async (request) => {
+    const runner: ExportProcessRunner = (request) => {
       if (request.args === renderPlan.render.args) {
         observed = {
           assExists: existsSync(subtitles.assPath),
@@ -178,10 +382,10 @@ describe('export job subtitle artifacts', () => {
       }
 
       writeLastArg(request);
-      return { exitCode: 0, stderrTail: '' };
+      return createFakeProcess({ autoExit: okProcess() });
     };
 
-    const result = await runExportJob({ plan: renderPlan, runner });
+    const result = await startExportJob({ plan: renderPlan, runner }).result;
 
     expect(result.ok).toBe(true);
     expect(observed?.cwd).toBe(path.dirname(renderPlan.targetPath));
@@ -202,15 +406,18 @@ describe('export job subtitle artifacts', () => {
       throw new Error('fixture must produce subtitle artifacts');
     }
 
-    const runner: ExportProcessRunner = async (request) => {
+    const runner: ExportProcessRunner = (request) => {
       writeLastArg(request);
 
-      return request.args === renderPlan.premix.args
-        ? { exitCode: 0, stderrTail: '' }
-        : { exitCode: 1, stderrTail: 'render boom' };
+      return createFakeProcess({
+        autoExit:
+          request.args === renderPlan.premix.args
+            ? okProcess()
+            : { exitCode: 1, stderrTail: 'render boom' },
+      });
     };
 
-    const result = await runExportJob({ plan: renderPlan, runner });
+    const result = await startExportJob({ plan: renderPlan, runner }).result;
 
     expect(result.ok).toBe(false);
     expect(existsSync(subtitles.assPath)).toBe(false);
@@ -228,15 +435,18 @@ describe('export job subtitle artifacts', () => {
       targetPath: path.join(root, '成片.mp4'),
     });
     let called = false;
-    const runner: ExportProcessRunner = async () => {
+    const runner: ExportProcessRunner = () => {
       called = true;
-      return { exitCode: 0, stderrTail: '' };
+
+      return createFakeProcess({ autoExit: okProcess() });
     };
 
-    const result = await runExportJob({ plan: renderPlan, runner });
+    const result = await startExportJob({ plan: renderPlan, runner }).result;
 
     expect(result.ok).toBe(false);
-    expect(result.ok ? null : result.error.code).toBe('EXPORT_FONT_MISSING');
+    expect(result.ok ? null : 'error' in result ? result.error.code : '').toBe(
+      'EXPORT_FONT_MISSING',
+    );
     expect(called).toBe(false);
     expect(existsSync(renderPlan.temporaryPath)).toBe(false);
     expect(existsSync(renderPlan.premixTemporaryPath)).toBe(false);

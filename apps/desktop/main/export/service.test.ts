@@ -1,12 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { WorkflowRunStatus } from '@miaoma/video-project';
 import type { ExportProgress, ExportState } from '../../shared/ipc-contract';
 import { ProjectStore } from '../projects/project-store';
-import type { ExportProcessRunner } from './runner';
+import type { ExportProcessRequest, ExportProcessRunner } from './runner';
 import { ExportService, type ExportServiceOptions } from './service';
+import { createFakeProcess, okProcess, type FakeProcess } from './test-support/fake-process';
 import {
   createExportFixture,
   EXPORT_TEST_FONTS,
@@ -18,6 +19,10 @@ let mediaRoot: string;
 let store: ProjectStore;
 let projectId: string;
 let revision: number;
+
+function workspaceRoot(): string {
+  return path.join(root, 'temp', 'miaoma-export-workspaces');
+}
 
 function writeMedia(): void {
   mediaRoot = path.join(root, 'media');
@@ -53,6 +58,7 @@ function createService(overrides: Partial<ExportServiceOptions> = {}): {
   const states: ExportState[] = [];
   const progress: ExportProgress[] = [];
   const service = new ExportService({
+    exportTempRoot: path.join(root, 'temp'),
     getExportFonts: () => EXPORT_TEST_FONTS,
     getProjectStore: () => store,
     getSettings: () => ({ defaultProjectDirectory: root }),
@@ -66,15 +72,27 @@ function createService(overrides: Partial<ExportServiceOptions> = {}): {
   return { progress, service, states };
 }
 
+function requireProcess(value: FakeProcess | null): FakeProcess {
+  if (value === null) {
+    throw new Error('渲染进程应该已经启动');
+  }
+
+  return value;
+}
+
+function writeLastArg(request: ExportProcessRequest): void {
+  const outputPath = request.args.at(-1);
+
+  if (outputPath) {
+    writeFileSync(outputPath, 'fake-mp4');
+  }
+}
+
 function successRunner(): ExportProcessRunner {
-  return async (request) => {
-    const temporaryPath = request.args.at(-1);
+  return (request) => {
+    writeLastArg(request);
 
-    if (temporaryPath) {
-      writeFileSync(temporaryPath, 'fake-mp4');
-    }
-
-    return { exitCode: 0, stderrTail: '' };
+    return createFakeProcess({ autoExit: okProcess() });
   };
 }
 
@@ -86,6 +104,7 @@ beforeEach(() => {
   projectId = seeded.projectId;
   revision = seeded.revision;
   mkdirSync(path.join(root, '导出'));
+  mkdirSync(path.join(root, 'temp'), { recursive: true });
 });
 
 afterEach(() => {
@@ -123,6 +142,127 @@ describe('export service', () => {
     ]);
     expect(existsSync(targetPath())).toBe(true);
     expect(service.getOutputPath(result.runId)).toBe(targetPath());
+    // 正常完成后临时工作区（以及登记文件）必须被清掉。
+    expect(readdirSync(workspaceRoot())).toEqual([]);
+  });
+
+  it('emits real rendering progress with percent, elapsed time and ETA', async () => {
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (request.args.at(-1) === path.join(root, '导出', '成片.mp4.partial')) {
+        request.onStdoutChunk?.('out_time_us=1000000\nspeed=2.0x\nprogress=continue\n');
+        request.onStdoutChunk?.('out_time_us=2000000\nspeed=2.0x\nprogress=end\n');
+      }
+
+      return createFakeProcess({ autoExit: okProcess() });
+    };
+    const { progress, service } = createService({ createRunner: () => runner });
+
+    await service.start({ expectedRevision: revision, projectId, targetPath: targetPath() });
+    await service.whenIdle();
+
+    const rendered = progress.filter(
+      (event) => event.phase === 'rendering' && event.percent !== null,
+    );
+
+    expect(rendered.map((event) => event.percent)).toEqual([50, 100]);
+    expect(rendered[0]?.etaMs).toBe(500);
+    expect(rendered[0]?.speed).toBe(2);
+    expect(rendered[0]?.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(rendered[0]?.renderedMediaMs).toBe(1_000);
+  });
+
+  it('cancels the active export, cleans temp artifacts and allows an immediate restart', async () => {
+    let manualRender = true;
+    let markRenderStarted: () => void = () => undefined;
+    const renderStarted = new Promise<void>((resolve) => {
+      markRenderStarted = resolve;
+    });
+    let renderProcess: FakeProcess | null = null;
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      if (!manualRender) {
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      if (request.args.at(-1) === path.join(root, '导出', '成片.mp4.partial.wav')) {
+        return createFakeProcess({ autoExit: okProcess() });
+      }
+
+      renderProcess = createFakeProcess({ exitOnQuit: { exitCode: 0, stderrTail: '' } });
+      markRenderStarted();
+
+      return renderProcess;
+    };
+    const { service, states } = createService({ createRunner: () => runner });
+
+    const result = await service.start({
+      expectedRevision: revision,
+      projectId,
+      targetPath: targetPath(),
+    });
+
+    await renderStarted;
+    expect(service.hasActive()).toBe(true);
+    service.cancel(result.runId);
+
+    expect(requireProcess(renderProcess).quitCount).toBe(1);
+    await service.whenIdle();
+
+    expect(states.at(-1)).toMatchObject({ phase: 'rendering', status: 'cancelled' });
+    expect(states.at(-1)?.error?.code).toBe('EXPORT_CANCELLED');
+    expect(existsSync(targetPath())).toBe(false);
+    expect(readdirSync(workspaceRoot())).toEqual([]);
+
+    // 取消后可以立刻再次导出，不会被上一次任务挡住。
+    manualRender = false;
+    const second = await service.start({
+      expectedRevision: revision,
+      projectId,
+      targetPath: targetPath(),
+    });
+    await service.whenIdle();
+
+    expect(second.runId).not.toBe(result.runId);
+    expect(states.at(-1)).toMatchObject({ status: 'succeeded' });
+    expect(existsSync(targetPath())).toBe(true);
+  });
+
+  it('treats cancel for an unknown or finished run as a no-op', async () => {
+    const { service, states } = createService({ createRunner: successRunner });
+
+    expect(service.cancel('unknown-run')).toBeNull();
+
+    await service.start({ expectedRevision: revision, projectId, targetPath: targetPath() });
+    await service.whenIdle();
+
+    const before = states.length;
+
+    expect(service.cancel('unknown-run')).toBeNull();
+    expect(service.hasActive()).toBe(false);
+    expect(states).toHaveLength(before);
+  });
+
+  it('keeps the renderer stderr tail as an expandable failure detail', async () => {
+    const runner: ExportProcessRunner = (request) => {
+      writeLastArg(request);
+
+      return createFakeProcess({
+        autoExit:
+          request.args.at(-1) === path.join(root, '导出', '成片.mp4.partial.wav')
+            ? okProcess()
+            : { exitCode: 1, stderrTail: 'Unknown filter ass' },
+      });
+    };
+    const { service, states } = createService({ createRunner: () => runner });
+
+    await service.start({ expectedRevision: revision, projectId, targetPath: targetPath() });
+    await service.whenIdle();
+
+    expect(states.at(-1)).toMatchObject({ status: 'failed' });
+    expect(states.at(-1)?.error?.detail).toContain('Unknown filter ass');
   });
 
   it('rejects a stale content revision', async () => {
@@ -166,15 +306,15 @@ describe('export service', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const runner: ExportProcessRunner = async (request) => {
-      await gate;
-      const temporaryPath = request.args.at(-1);
+    const runner: ExportProcessRunner = (request) => {
+      const fake = createFakeProcess();
 
-      if (temporaryPath) {
-        writeFileSync(temporaryPath, 'fake-mp4');
-      }
+      void gate.then(() => {
+        writeLastArg(request);
+        fake.resolve(okProcess());
+      });
 
-      return { exitCode: 0, stderrTail: '' };
+      return fake;
     };
     const { service } = createService({ createRunner: () => runner });
 

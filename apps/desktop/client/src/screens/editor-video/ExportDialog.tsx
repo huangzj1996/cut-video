@@ -7,6 +7,12 @@ import {
   isExportDialogLocked,
   type ExportDialogError,
 } from './export-dialog';
+import {
+  formatExportElapsed,
+  formatExportEta,
+  formatExportPercent,
+  formatExportSpeed,
+} from './export-format';
 
 interface ExportDialogProps {
   /** 开始导出前自动保存，返回保存后的内容修订号；失败时抛出。 */
@@ -58,14 +64,24 @@ function startError(message: string): ExportDialogError {
   return { message };
 }
 
-/** 导出弹窗：准备 → 渲染 → 完成/失败。渲染期间不允许关闭或重复发起。 */
+function clampPercent(percent: number | null): number | null {
+  return percent === null || !Number.isFinite(percent) ? null : Math.min(100, Math.max(0, percent));
+}
+
+/** 导出弹窗：准备 → 渲染 → 完成/失败。渲染期间取消需要二次确认。 */
 export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDialogProps) {
   const [state, dispatch] = useReducer(exportDialogReducer, undefined, () =>
     createExportDialogState(projectId),
   );
   const [targetError, setTargetError] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [loadingTarget, setLoadingTarget] = useState(false);
   const locked = isExportDialogLocked(state);
+
+  // 渲染中点关闭按钮/Esc/遮罩都先走取消二次确认，而不是直接关窗。
+  const requestCancel = (): void => {
+    dispatch({ type: 'cancel-requested' });
+  };
 
   useEffect(() => {
     if (!open) {
@@ -77,6 +93,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
 
     dispatch({ type: 'reset' });
     setTargetError(null);
+    setCancelError(null);
 
     if (!api) {
       setTargetError('Preload 桥接未加载，无法导出。');
@@ -118,12 +135,32 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
   }, []);
 
   useEffect(() => {
+    const api = window.miaoma?.export;
+
+    if (!api) {
+      return;
+    }
+
+    return api.onProgress((event) => dispatch({ progress: event, type: 'progress' }));
+  }, []);
+
+  useEffect(() => {
     if (!open) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && !locked) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      // 渲染中按 Esc 不能直接关闭窗口，先进入取消确认。
+      if (state.step === 'running') {
+        requestCancel();
+        return;
+      }
+
+      if (!locked) {
         onClose();
       }
     };
@@ -133,7 +170,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [locked, onClose, open]);
+  }, [locked, onClose, open, state.step]);
 
   if (!open) {
     return null;
@@ -152,6 +189,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
       return;
     }
 
+    setCancelError(null);
     dispatch({ type: 'start-requested' });
 
     let revision: number;
@@ -242,7 +280,40 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
     }
   };
 
+  const dismissCancel = (): void => {
+    setCancelError(null);
+    dispatch({ type: 'cancel-dismissed' });
+  };
+
+  const confirmCancel = async (): Promise<void> => {
+    const api = window.miaoma?.export;
+
+    if (!api || !state.runId) {
+      return;
+    }
+
+    const runId = state.runId;
+
+    setCancelError(null);
+    dispatch({ type: 'cancel-confirmed' });
+
+    try {
+      const response = await api.cancel(runId);
+
+      if (!response.ok) {
+        setCancelError(response.error.message);
+        dispatch({ type: 'cancel-dismissed' });
+      }
+    } catch {
+      setCancelError('取消导出失败，请重试。');
+      dispatch({ type: 'cancel-dismissed' });
+    }
+  };
+
   const error = state.error;
+  const progress = state.progress;
+  const percent = clampPercent(progress?.percent ?? null);
+  const showPercent = state.step === 'running' && state.phase === 'rendering';
   const title =
     state.step === 'running'
       ? exportPhaseLabel(state.phase)
@@ -256,7 +327,17 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
     <div
       className="ed-export-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !locked) {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+
+        // 渲染中点遮罩不直接关闭，和 Esc/取消按钮一样先走取消确认。
+        if (state.step === 'running') {
+          requestCancel();
+          return;
+        }
+
+        if (!locked) {
           onClose();
         }
       }}
@@ -277,6 +358,12 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             <p className="ed-export-description">
               把当前时间线的画面、配音与音乐渲染为一个可播放的 MP4。开始前会自动保存当前编辑。
             </p>
+
+            {state.notice ? (
+              <p className="ed-export-notice" role="status">
+                {state.notice}
+              </p>
+            ) : null}
 
             <div className="ed-export-path">
               <span className="ed-export-label">保存位置</span>
@@ -303,7 +390,7 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             </div>
 
             <p className="ed-export-note">
-              当前包含配音与音乐混音（源视频原声静音）；字幕与剩余时间将在后续切片接入。
+              当前包含配音与音乐混音（源视频原声静音）；字幕与实时剩余时间显示已接入。
             </p>
 
             {targetError ? <p className="ed-export-error">{targetError}</p> : null}
@@ -335,13 +422,86 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
             <div className="ed-export-progress" role="status">
               <span aria-hidden="true" className="ed-export-spinner" />
               <span>{exportPhaseLabel(state.phase)}…</span>
+              {showPercent ? (
+                <span className="ed-export-percent">{formatExportPercent(percent)}</span>
+              ) : null}
             </div>
+
+            {showPercent ? (
+              <>
+                <div
+                  aria-label="导出进度"
+                  aria-valuemax={100}
+                  aria-valuemin={0}
+                  aria-valuenow={percent ?? 0}
+                  aria-valuetext={formatExportPercent(percent)}
+                  className="ed-export-progressbar"
+                  role="progressbar"
+                >
+                  <div
+                    className="ed-export-progressbar-fill"
+                    style={{ width: `${percent ?? 0}%` }}
+                  />
+                </div>
+                <dl className="ed-export-metrics">
+                  <div className="ed-export-metric">
+                    <dt>预计剩余</dt>
+                    <dd>{formatExportEta(progress?.etaMs ?? null)}</dd>
+                  </div>
+                  <div className="ed-export-metric">
+                    <dt>已用</dt>
+                    <dd>{formatExportElapsed(progress?.elapsedMs ?? 0)}</dd>
+                  </div>
+                  <div className="ed-export-metric">
+                    <dt>速度</dt>
+                    <dd>{formatExportSpeed(progress?.speed ?? null)}</dd>
+                  </div>
+                </dl>
+              </>
+            ) : null}
+
             <p className="ed-export-description">
               渲染完成前请勿关闭窗口；完成后成品会出现在保存位置。
             </p>
             <p className="ed-export-path-value" title={state.targetPath}>
               {state.targetPath}
             </p>
+
+            {state.cancelStep !== 'idle' ? (
+              <div aria-label="确认取消导出" className="ed-export-cancel-panel" role="alertdialog">
+                <p className="ed-export-cancel-text">
+                  {state.cancelStep === 'cancelling'
+                    ? '正在取消…'
+                    : '确定取消本次导出吗？已渲染的内容不会保留。'}
+                </p>
+                <div className="ed-export-actions">
+                  <button
+                    className="ed-export-secondary"
+                    disabled={state.cancelStep === 'cancelling'}
+                    onClick={dismissCancel}
+                    type="button"
+                  >
+                    继续渲染
+                  </button>
+                  <button
+                    className="ed-export-primary"
+                    disabled={state.cancelStep === 'cancelling'}
+                    onClick={() => void confirmCancel()}
+                    type="button"
+                  >
+                    确认取消
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="ed-export-actions">
+                <button className="ed-export-secondary" onClick={requestCancel} type="button">
+                  取消导出
+                </button>
+              </div>
+            )}
+
+            {cancelError ? <p className="ed-export-error">{cancelError}</p> : null}
           </>
         ) : null}
 
@@ -401,6 +561,12 @@ function ExportErrorBlock({ error }: { error: ExportDialogError }) {
             </li>
           ))}
         </ul>
+      ) : null}
+      {error.detail ? (
+        <details className="ed-export-detail">
+          <summary>查看失败详情</summary>
+          <pre>{error.detail}</pre>
+        </details>
       ) : null}
     </div>
   );

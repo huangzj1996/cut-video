@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
+import os from 'node:os';
 import type { WorkflowRunStatus } from '@miaoma/video-project';
 import type {
   AppSettings,
   ExportDefaultTarget,
-  ExportErrorInfo,
   ExportPhase,
   ExportProgress,
   ExportStartInput,
@@ -14,12 +14,19 @@ import type {
 import { IpcError } from '../ipc-error';
 import { assertProjectId } from '../ipc-args';
 import type { ProjectStore } from '../projects/project-store';
+import { exportTempArtifactsFromPlan } from './artifacts';
 import type { ExportFonts } from './fonts';
-import { runExportJob } from './job';
+import { startExportJob, type ExportJobHandle } from './job';
 import { compileExportPlan, ExportPlanError, type ExportPlan } from './plan';
 import { validateExportPreflight, type ExportPreflightDeps } from './preflight';
+import { createEtaEstimator } from './progress';
 import { runExportProcess, type ExportProcessRunner } from './runner';
 import { assertExportTargetPath, buildDefaultExportTarget } from './target';
+import {
+  createExportTempWorkspace,
+  resolveExportWorkspaceRoot,
+  type ExportTempWorkspace,
+} from './temp-workspace';
 
 export interface ExportServiceMedia {
   ffmpegAvailable: boolean;
@@ -28,6 +35,8 @@ export interface ExportServiceMedia {
 
 export interface ExportServiceOptions {
   createRunner?: () => ExportProcessRunner;
+  /** 系统临时目录根路径；用于登记本次导出的临时产物。默认 OS 临时目录。 */
+  exportTempRoot?: string;
   /** 随包字体；缺失时返回 null，前置校验据此报 EXPORT_FONT_MISSING。 */
   getExportFonts: () => ExportFonts | null;
   getProjectStore: () => ProjectStore;
@@ -53,14 +62,16 @@ interface ExecuteExportInput {
   runId: string;
   startedAt: number;
   targetPath: string;
+  workspace: ExportTempWorkspace | null;
 }
 
 /**
- * 导出任务服务：全局单任务，负责前置校验、编译计划、执行与状态广播。
- * 渲染进程只通过 IPC 发起与订阅；错误码统一使用 EXPORT_ 前缀。
+ * 导出任务服务：全局单任务，负责前置校验、编译计划、执行、进度广播与取消。
+ * 渲染进程只通过 IPC 发起、取消与订阅；错误码统一使用 EXPORT_ 前缀。
  */
 export class ExportService {
   private active: ActiveExport | null = null;
+  private activeJob: ExportJobHandle | null = null;
   private readonly completed = new Map<string, string>();
 
   constructor(private readonly options: ExportServiceOptions) {}
@@ -98,6 +109,43 @@ export class ExportService {
     }
 
     return outputPath;
+  }
+
+  /** 当前是否有导出任务在跑；关窗确认用。 */
+  hasActive(): boolean {
+    return this.active !== null;
+  }
+
+  /** 关窗流程用：不校验 runId，直接请求取消当前任务。 */
+  cancelActive(): void {
+    if (this.active) {
+      this.requestCancelActive();
+    }
+  }
+
+  /**
+   * 请求取消当前任务。start() 返回前 execute 已经创建好任务句柄，因此 IPC 能处理
+   * cancel 时句柄必然存在；没有句柄说明任务已经收束，取消是 no-op。
+   */
+  private requestCancelActive(): void {
+    this.activeJob?.cancel();
+  }
+
+  /**
+   * 取消指定 runId 的导出；任务不存在或已结束时是 no-op。
+   * 取消是异步收束的：先请求渲染进程优雅退出，超时强杀，期间状态事件继续推送。
+   */
+  cancel(rawRunId: unknown): null {
+    if (typeof rawRunId !== 'string' || rawRunId.length === 0) {
+      throw new IpcError('IPC_INVALID_ARGUMENT', '导出任务 ID 无效。');
+    }
+
+    if (!this.active || this.active.runId !== rawRunId) {
+      return null;
+    }
+
+    this.requestCancelActive();
+    return null;
   }
 
   /** 测试与关窗等待用：当前任务的 Promise；没有任务时立即完成。 */
@@ -169,7 +217,9 @@ export class ExportService {
 
       throw error;
     }
-    const startedAt = Date.now();
+
+    const workspace = this.createWorkspace(plan, runId);
+    const startedAt = this.nowMs();
 
     this.emitState({
       phase: 'preparing',
@@ -185,6 +235,7 @@ export class ExportService {
       runId,
       startedAt,
       targetPath,
+      workspace,
     }).finally(() => {
       if (this.active?.runId === runId) {
         this.active = null;
@@ -198,7 +249,9 @@ export class ExportService {
 
   private async execute(input: ExecuteExportInput): Promise<void> {
     const runner = this.options.createRunner?.() ?? runExportProcess;
+    const estimator = createEtaEstimator({ totalDurationMs: input.plan.expected.durationMs });
     let lastPhase: ExportPhase = 'validating';
+    let job: ExportJobHandle | null = null;
 
     const publish = (phase: ExportPhase): void => {
       lastPhase = phase;
@@ -209,8 +262,10 @@ export class ExportService {
         status: 'running',
         targetPath: input.targetPath,
       });
+
+      // 只有 rendering 阶段有真实百分比；mixing/verifying 等阶段不伪造进度。
       this.options.onProgress({
-        elapsedMs: Date.now() - input.startedAt,
+        elapsedMs: this.nowMs() - input.startedAt,
         etaMs: null,
         percent: null,
         phase,
@@ -220,16 +275,33 @@ export class ExportService {
       });
     };
 
-    publish('validating');
-
-    let error: ExportErrorInfo;
-
     try {
-      const result = await runExportJob({
+      publish('validating');
+
+      job = startExportJob({
         onPhase: publish,
+        onProgress: (sample) => {
+          const estimate = estimator.update(sample, {
+            elapsedMs: this.nowMs() - input.startedAt,
+          });
+
+          this.options.onProgress({
+            elapsedMs: this.nowMs() - input.startedAt,
+            etaMs: estimate.etaMs,
+            percent: estimate.percent,
+            phase: 'rendering',
+            renderedMediaMs: estimate.renderedMediaMs,
+            runId: input.runId,
+            speed: estimate.speed,
+          });
+        },
         plan: input.plan,
         runner,
       });
+
+      this.activeJob = job;
+
+      const result = await job.result;
 
       if (result.ok) {
         this.completed.set(input.runId, result.outputPath);
@@ -244,19 +316,61 @@ export class ExportService {
         return;
       }
 
-      error = result.error;
-    } catch {
-      error = { code: 'EXPORT_RENDER_FAILED', message: '导出过程异常中止，未提交成品。' };
-    }
+      if ('cancelled' in result) {
+        this.emitState({
+          error: { code: 'EXPORT_CANCELLED', message: '已取消导出，临时产物已清理。' },
+          phase: result.phase,
+          projectId: input.projectId,
+          runId: input.runId,
+          status: 'cancelled',
+          targetPath: input.targetPath,
+        });
+        return;
+      }
 
-    this.emitState({
-      error,
-      phase: lastPhase,
-      projectId: input.projectId,
-      runId: input.runId,
-      status: 'failed',
-      targetPath: input.targetPath,
-    });
+      this.emitState({
+        error: result.error,
+        phase: lastPhase,
+        projectId: input.projectId,
+        runId: input.runId,
+        status: 'failed',
+        targetPath: input.targetPath,
+      });
+    } catch {
+      // 意外异常也要确保渲染进程被请求退出，避免孤儿 ffmpeg。
+      job?.cancel();
+      this.emitState({
+        error: { code: 'EXPORT_RENDER_FAILED', message: '导出过程异常中止，未提交成品。' },
+        phase: lastPhase,
+        projectId: input.projectId,
+        runId: input.runId,
+        status: 'failed',
+        targetPath: input.targetPath,
+      });
+    } finally {
+      if (job && this.activeJob === job) {
+        this.activeJob = null;
+      }
+
+      input.workspace?.dispose();
+    }
+  }
+
+  /**
+   * 登记本次导出的临时产物：正常路径由任务清理，进程崩溃时由下次启动清理。
+   * 登记失败只影响崩溃后的兜底清理，不应该阻止导出本身。
+   */
+  private createWorkspace(plan: ExportPlan, runId: string): ExportTempWorkspace | null {
+    try {
+      return createExportTempWorkspace({
+        artifacts: exportTempArtifactsFromPlan(plan),
+        createdAt: this.nowMs(),
+        root: resolveExportWorkspaceRoot(this.options.exportTempRoot ?? os.tmpdir()),
+        token: runId,
+      });
+    } catch {
+      return null;
+    }
   }
 
   private emitState(state: ExportState): void {
@@ -265,6 +379,10 @@ export class ExportService {
 
   private now(): Date {
     return this.options.now?.() ?? new Date();
+  }
+
+  private nowMs(): number {
+    return this.now().getTime();
   }
 
   private parseStartInput(rawInput: unknown): ExportStartInput {

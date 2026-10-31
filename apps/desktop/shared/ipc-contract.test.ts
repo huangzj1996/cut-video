@@ -60,6 +60,7 @@ describe('IPC channel contract', () => {
 
   it('registers the export channels and error code namespace', () => {
     expect(Object.values(IPC_CHANNELS.export).sort()).toEqual([
+      'export:cancel',
       'export:choose-target',
       'export:default-target',
       'export:reveal',

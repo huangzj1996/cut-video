@@ -1,23 +1,44 @@
 import type {
   ExportIssue,
   ExportPhase,
+  ExportProgress,
   ExportState,
   IpcErrorCode,
 } from '../../../../shared/ipc-contract';
 
 export type ExportDialogStep = 'failed' | 'prepare' | 'running' | 'succeeded';
 
+/** 取消交互的三态：确认中、正在取消、没有取消交互。 */
+export type ExportCancelStep = 'cancelling' | 'confirming' | 'idle';
+
+/** 取消成功后回到准备态时展示的提示；主进程已清理临时产物，可以立刻重新导出。 */
+export const EXPORT_CANCELLED_NOTICE = '已取消导出，临时产物已清理，可以重新导出。';
+
 export interface ExportDialogError {
   code?: IpcErrorCode;
+  /** 渲染进程 stderr 尾部等可直接展示的失败详情。 */
+  detail?: string;
   issues?: ExportIssue[];
   message: string;
 }
 
+/** 只保留 UI 需要的进度字段；runId 由外层状态持有，用于过滤跨任务事件。 */
+export interface ExportDialogProgress {
+  elapsedMs: number;
+  etaMs: number | null;
+  percent: number | null;
+  renderedMediaMs: number | null;
+  speed: number | null;
+}
+
 export interface ExportDialogState {
   busy: boolean;
+  cancelStep: ExportCancelStep;
   error: ExportDialogError | null;
+  notice: string | null;
   outputPath: string | null;
   phase: ExportPhase;
+  progress: ExportDialogProgress | null;
   projectId: string;
   runId: string | null;
   step: ExportDialogStep;
@@ -31,6 +52,10 @@ export type ExportDialogAction =
   | { error: ExportDialogError; type: 'start-failed' }
   | { runId: string; targetPath: string; type: 'started' }
   | { state: ExportState; type: 'state' }
+  | { progress: ExportProgress; type: 'progress' }
+  | { type: 'cancel-requested' }
+  | { type: 'cancel-dismissed' }
+  | { type: 'cancel-confirmed' }
   | { type: 'retry' }
   | { type: 'reset' };
 
@@ -50,9 +75,12 @@ export function exportPhaseLabel(phase: ExportPhase): string {
 export function createExportDialogState(projectId = '', targetPath = ''): ExportDialogState {
   return {
     busy: false,
+    cancelStep: 'idle',
     error: null,
+    notice: null,
     outputPath: null,
     phase: 'preparing',
+    progress: null,
     projectId,
     runId: null,
     step: 'prepare',
@@ -87,23 +115,45 @@ function stateFromEvent(state: ExportDialogState, event: ExportState): ExportDia
   if (event.status === 'succeeded') {
     return {
       ...base,
+      cancelStep: 'idle',
       error: null,
       outputPath: event.outputPath ?? event.targetPath,
       phase: event.phase,
+      progress: null,
       step: 'succeeded',
     };
   }
 
+  // 取消是终态：临时产物已清理，直接回到准备态并允许再次导出。
+  if (event.status === 'cancelled') {
+    return {
+      ...base,
+      busy: false,
+      cancelStep: 'idle',
+      error: null,
+      notice: EXPORT_CANCELLED_NOTICE,
+      phase: 'preparing',
+      progress: null,
+      runId: null,
+      step: 'prepare',
+    };
+  }
+
+  const error: ExportDialogError = event.error
+    ? {
+        code: event.error.code,
+        ...(event.error.detail ? { detail: event.error.detail } : {}),
+        ...(event.error.issues ? { issues: event.error.issues } : {}),
+        message: event.error.message,
+      }
+    : { message: '导出失败，请重试。' };
+
   return {
     ...base,
-    error: event.error
-      ? {
-          code: event.error.code,
-          message: event.error.message,
-          ...(event.error.issues ? { issues: event.error.issues } : {}),
-        }
-      : { message: '导出失败，请重试。' },
+    cancelStep: 'idle',
+    error,
     phase: event.phase,
+    progress: null,
     step: 'failed',
   };
 }
@@ -119,11 +169,25 @@ export function exportDialogReducer(
 
     case 'start-requested':
       return state.step === 'prepare' && !state.busy
-        ? { ...state, busy: true, error: null }
+        ? {
+            ...state,
+            busy: true,
+            cancelStep: 'idle',
+            error: null,
+            notice: null,
+            progress: null,
+          }
         : state;
 
     case 'start-failed':
-      return { ...state, busy: false, error: action.error, step: 'prepare' };
+      return {
+        ...state,
+        busy: false,
+        cancelStep: 'idle',
+        error: action.error,
+        progress: null,
+        step: 'prepare',
+      };
 
     case 'started':
       // 启动请求期间可能已经收到同一次任务的状态事件，不能把终态覆盖回 running。
@@ -131,12 +195,20 @@ export function exportDialogReducer(
         return { ...state, busy: false, targetPath: action.targetPath };
       }
 
+      // 取消后迟到的启动响应不能把准备态复活成旧任务；重新发起会先清掉取消提示。
+      if (state.notice === EXPORT_CANCELLED_NOTICE) {
+        return state;
+      }
+
       return {
         ...state,
         busy: false,
+        cancelStep: 'idle',
         error: null,
+        notice: null,
         outputPath: null,
         phase: 'preparing',
+        progress: null,
         runId: action.runId,
         step: 'running',
         targetPath: action.targetPath,
@@ -145,13 +217,51 @@ export function exportDialogReducer(
     case 'state':
       return stateFromEvent(state, action.state);
 
+    case 'progress':
+      // 只接受当前 running 任务自己的进度；跨任务或终态后的迟到事件一律丢弃。
+      if (state.step !== 'running' || state.runId === null) {
+        return state;
+      }
+
+      if (state.runId !== action.progress.runId) {
+        return state;
+      }
+
+      return {
+        ...state,
+        progress: {
+          elapsedMs: action.progress.elapsedMs,
+          etaMs: action.progress.etaMs,
+          percent: action.progress.percent,
+          renderedMediaMs: action.progress.renderedMediaMs,
+          speed: action.progress.speed,
+        },
+      };
+
+    case 'cancel-requested':
+      return state.step === 'running' && state.cancelStep === 'idle'
+        ? { ...state, cancelStep: 'confirming' }
+        : state;
+
+    case 'cancel-dismissed':
+      return state.cancelStep === 'idle' ? state : { ...state, cancelStep: 'idle' };
+
+    case 'cancel-confirmed':
+      return state.step === 'running' && state.cancelStep !== 'cancelling'
+        ? { ...state, cancelStep: 'cancelling' }
+        : state;
+
     case 'retry':
       return state.step === 'failed'
         ? {
             ...state,
+            busy: false,
+            cancelStep: 'idle',
             error: null,
+            notice: null,
             outputPath: null,
             phase: 'preparing',
+            progress: null,
             runId: null,
             step: 'prepare',
           }

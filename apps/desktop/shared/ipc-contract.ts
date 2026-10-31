@@ -66,21 +66,24 @@ export type ExportPhase =
   'preparing' | 'validating' | 'mixing' | 'rendering' | 'verifying' | 'committing';
 
 /**
- * EXPORT_* 错误码骨架：本切片产生运行中、只读/草稿、修订过期、校验失败、
- * 目标不可写与渲染失败；其余留给音频、字幕、取消与同步自检切片。
+ * 导出错误码是 IPC 契约的一部分：主进程只抛这些码，渲染进程按码与文案展示。
+ * 运行时数组让契约测试能钉死完整命名空间，类型从它推导。
  */
-export type ExportErrorCode =
-  | 'EXPORT_ALREADY_RUNNING'
-  | 'EXPORT_PROJECT_READONLY_OR_DRAFT'
-  | 'EXPORT_PROJECT_STALE'
-  | 'EXPORT_VALIDATION_FAILED'
-  | 'EXPORT_UNSUPPORTED_MEDIA'
-  | 'EXPORT_UNSUPPORTED_TRANSFORM'
-  | 'EXPORT_FONT_MISSING'
-  | 'EXPORT_TARGET_UNWRITABLE'
-  | 'EXPORT_RENDER_FAILED'
-  | 'EXPORT_SYNC_CHECK_FAILED'
-  | 'EXPORT_CANCELLED';
+export const EXPORT_ERROR_CODES = [
+  'EXPORT_ALREADY_RUNNING',
+  'EXPORT_PROJECT_READONLY_OR_DRAFT',
+  'EXPORT_PROJECT_STALE',
+  'EXPORT_VALIDATION_FAILED',
+  'EXPORT_UNSUPPORTED_MEDIA',
+  'EXPORT_UNSUPPORTED_TRANSFORM',
+  'EXPORT_FONT_MISSING',
+  'EXPORT_TARGET_UNWRITABLE',
+  'EXPORT_RENDER_FAILED',
+  'EXPORT_SYNC_CHECK_FAILED',
+  'EXPORT_CANCELLED',
+] as const;
+
+export type ExportErrorCode = (typeof EXPORT_ERROR_CODES)[number];
 
 /** 固定的输出规格；计划编译器与导出弹窗共用同一份数值，避免两处漂移。 */
 export const EXPORT_OUTPUT_SPEC = {

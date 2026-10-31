@@ -3,6 +3,7 @@ import { EXPORT_OUTPUT_SPEC, type ExportIssue } from '../../../../shared/ipc-con
 import {
   createExportDialogState,
   exportDialogReducer,
+  exportIssueText,
   exportPhaseLabel,
   isExportDialogLocked,
   type ExportDialogError,
@@ -552,12 +553,16 @@ export function ExportDialog({ beforeStart, onClose, open, projectId }: ExportDi
 function ExportErrorBlock({ error }: { error: ExportDialogError }) {
   return (
     <div className="ed-export-error-block" role="alert">
-      <p className="ed-export-error">{error.message}</p>
+      <p className="ed-export-error">
+        {error.code ? <code className="ed-export-error-code">{error.code}</code> : null}
+        {error.code ? ' · ' : null}
+        {error.message}
+      </p>
       {error.issues && error.issues.length > 0 ? (
         <ul className="ed-export-issues">
           {error.issues.map((issue, index) => (
             <li key={issue.code + '-' + index + '-' + (issue.clipId ?? issue.fieldPath ?? '')}>
-              {issue.message}
+              {exportIssueText(issue)}
             </li>
           ))}
         </ul>

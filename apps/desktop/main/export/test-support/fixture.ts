@@ -1,7 +1,9 @@
 import type {
+  Crop,
   MusicClip,
   SubtitleClip,
   SubtitlePresetId,
+  Transform,
   VideoClip,
   VideoProject,
   VoiceClip,
@@ -26,7 +28,13 @@ export interface ExportFixtureSubtitleOptions {
 
 export interface ExportFixtureOptions {
   audioPath?: string;
+  /** 视频片段的 crop；缺省为默认裁剪。 */
+  crop?: Crop;
   firstMediaType?: 'image' | 'video';
+  /** 视频素材的 HDR 标记；缺省不写入。 */
+  isHdr?: boolean;
+  /** 视频素材的 VFR 标记；缺省不写入。 */
+  isVfr?: boolean;
   musicLoop?: boolean;
   musicPath?: string;
   musicSourceEndMs?: number;
@@ -34,6 +42,10 @@ export interface ExportFixtureOptions {
   musicVolume?: number;
   speed?: number;
   subtitle?: ExportFixtureSubtitleOptions;
+  /** 视频片段的 transform；缺省为默认变换。 */
+  transform?: Transform;
+  /** 视频素材的编码；缺省不写入，模拟旧工程。 */
+  videoCodec?: string;
   videoPaths?: readonly [string, string];
   voiceSpeed?: number;
   voiceVolume?: number;
@@ -45,11 +57,11 @@ function videoClip(
   startMs: number,
   endMs: number,
   sceneId: string,
-  speed?: number,
+  options: { crop?: Crop; speed?: number; transform?: Transform } = {},
 ): VideoClip {
   return {
     assetId,
-    crop: { height: 1, width: 1, x: 0, y: 0 },
+    crop: options.crop ?? { height: 1, width: 1, x: 0, y: 0 },
     endMs,
     id,
     kind: 'video',
@@ -57,8 +69,8 @@ function videoClip(
     sourceEndMs: endMs - startMs,
     sourceStartMs: 0,
     startMs,
-    ...(speed !== undefined ? { speed } : {}),
-    transform: { scale: 1, x: 0, y: 0 },
+    ...(options.speed !== undefined ? { speed: options.speed } : {}),
+    transform: options.transform ?? { scale: 1, x: 0, y: 0 },
   };
 }
 
@@ -125,8 +137,16 @@ export function createExportFixture(options: ExportFixtureOptions = {}): VideoPr
   const tracks: VideoProject['tracks'] = [
     {
       clips: [
-        videoClip('clip-1', 'video-a', 0, 1_000, 'scene-1', options.speed),
-        videoClip('clip-2', 'video-b', 1_000, 2_000, 'scene-2', options.speed),
+        videoClip('clip-1', 'video-a', 0, 1_000, 'scene-1', {
+          crop: options.crop,
+          speed: options.speed,
+          transform: options.transform,
+        }),
+        videoClip('clip-2', 'video-b', 1_000, 2_000, 'scene-2', {
+          crop: options.crop,
+          speed: options.speed,
+          transform: options.transform,
+        }),
       ],
       id: 'track-video',
       kind: 'video',
@@ -195,6 +215,9 @@ export function createExportFixture(options: ExportFixtureOptions = {}): VideoPr
       videos: [
         {
           ...(firstType === 'video' ? { fps: 30 } : {}),
+          ...(options.videoCodec !== undefined ? { codec: options.videoCodec } : {}),
+          ...(options.isHdr !== undefined ? { isHdr: options.isHdr } : {}),
+          ...(options.isVfr !== undefined ? { isVfr: options.isVfr } : {}),
           durationMs: 5_000,
           height: 1080,
           id: 'video-a',
@@ -204,6 +227,9 @@ export function createExportFixture(options: ExportFixtureOptions = {}): VideoPr
           width: 1920,
         },
         {
+          ...(options.videoCodec !== undefined ? { codec: options.videoCodec } : {}),
+          ...(options.isHdr !== undefined ? { isHdr: options.isHdr } : {}),
+          ...(options.isVfr !== undefined ? { isVfr: options.isVfr } : {}),
           durationMs: 5_000,
           fps: 30,
           height: 1080,

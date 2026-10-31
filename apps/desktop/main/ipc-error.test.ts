@@ -15,6 +15,28 @@ describe('toIpcErrorPayload', () => {
     });
   });
 
+  it('carries EXPORT_ capability codes and issue locators over the IPC envelope', () => {
+    const issues = [
+      {
+        assetId: 'video-a',
+        clipId: 'clip-1',
+        code: 'EXPORT_UNSUPPORTED_MEDIA',
+        message: '不支持的视频编码：hevc。',
+        sceneId: 'scene-1',
+      },
+    ];
+    const payload = toIpcErrorPayload(
+      new IpcError('EXPORT_UNSUPPORTED_MEDIA', '存在当前版本不支持的视频素材。', false, { issues }),
+    );
+
+    expect(payload).toEqual({
+      code: 'EXPORT_UNSUPPORTED_MEDIA',
+      message: '存在当前版本不支持的视频素材。',
+      retryable: false,
+      details: { issues },
+    });
+  });
+
   it('does not leak raw error messages or stacks', () => {
     const payload = toIpcErrorPayload(new Error('secret at C:\\private\\file.ts:42'));
 

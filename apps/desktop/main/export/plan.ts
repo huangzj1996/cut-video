@@ -10,6 +10,8 @@ import type {
 } from '@miaoma/video-project';
 import { EXPORT_OUTPUT_SPEC, type ExportErrorCode } from '../../shared/ipc-contract';
 import type { ExportFonts } from './fonts';
+import { EXPORT_MESSAGES } from './messages';
+import { sortedVideoClips } from './project-clips';
 import { buildSubtitleDocument, subtitleArtifactFileNames } from './subtitles';
 import { partialPathFor, premixPartialPathFor } from './target';
 
@@ -140,7 +142,7 @@ function videoAssetById(project: VideoProject, assetId: string): VideoAsset {
   const asset = project.assets.videos.find((candidate) => candidate.id === assetId);
 
   if (!asset) {
-    throw new ExportPlanError('视频片段引用了不存在的素材。');
+    throw new ExportPlanError(EXPORT_MESSAGES.plan.videoAssetMissing);
   }
 
   return asset;
@@ -332,7 +334,7 @@ function buildPremixGraph(input: {
 
   const assertInTimeline = (endMs: number): void => {
     if (endMs > totalDurationMs) {
-      throw new ExportPlanError('音频片段超出时间线，无法导出。');
+      throw new ExportPlanError(EXPORT_MESSAGES.plan.audioOutOfTimeline);
     }
   };
 
@@ -340,7 +342,7 @@ function buildPremixGraph(input: {
     const asset = voicesById.get(clip.assetId);
 
     if (!asset) {
-      throw new ExportPlanError('配音片段引用了不存在的音频素材。');
+      throw new ExportPlanError(EXPORT_MESSAGES.plan.voiceAssetMissing);
     }
 
     assertInTimeline(clip.endMs);
@@ -353,7 +355,7 @@ function buildPremixGraph(input: {
     const asset = musicById.get(clip.assetId);
 
     if (!asset) {
-      throw new ExportPlanError('音乐片段引用了不存在的音频素材。');
+      throw new ExportPlanError(EXPORT_MESSAGES.plan.musicAssetMissing);
     }
 
     assertInTimeline(clip.endMs);
@@ -402,13 +404,11 @@ function buildVideoCommand(input: {
     temporaryPath,
     totalDurationMs,
   } = input;
-  const videoTrack = project.tracks.find((track) => track.kind === 'video');
+  const clips = sortedVideoClips(project);
 
-  if (!videoTrack || videoTrack.kind !== 'video' || videoTrack.clips.length === 0) {
-    throw new ExportPlanError('视频轨没有可导出的片段。');
+  if (clips.length === 0) {
+    throw new ExportPlanError(EXPORT_MESSAGES.plan.noVideoClips);
   }
-
-  const clips = videoTrack.clips.slice().sort((left, right) => left.startMs - right.startMs);
   const inputs: string[] = [];
   const filterChains: string[] = [];
   const concatLabels: string[] = [];
@@ -418,7 +418,7 @@ function buildVideoCommand(input: {
 
   for (const [index, clip] of clips.entries()) {
     if (clip.startMs !== cursorMs) {
-      throw new ExportPlanError('视频轨片段之间存在空隙或重叠，无法导出。');
+      throw new ExportPlanError(EXPORT_MESSAGES.plan.videoGapOrOverlap);
     }
 
     const startFrame = frameAt(clip.startMs);
@@ -426,7 +426,7 @@ function buildVideoCommand(input: {
     const frameCount = endFrame - startFrame;
 
     if (startFrame !== cursorFrame || frameCount <= 0) {
-      throw new ExportPlanError('视频片段短于一个输出帧或与时间线不对齐，无法导出。');
+      throw new ExportPlanError(EXPORT_MESSAGES.plan.clipTooShort);
     }
 
     const asset = videoAssetById(project, clip.assetId);
@@ -446,7 +446,7 @@ function buildVideoCommand(input: {
   }
 
   if (cursorMs !== totalDurationMs) {
-    throw new ExportPlanError('视频轨未覆盖完整时间线，无法导出。');
+    throw new ExportPlanError(EXPORT_MESSAGES.plan.videoNotCoveringTimeline);
   }
 
   const postFilters = ['concat=n=' + clips.length + ':v=1:a=0'];
@@ -551,7 +551,7 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
   const artifactNames = subtitleDocument ? subtitleArtifactFileNames(input.artifactToken) : null;
 
   if (subtitleDocument && !input.fonts) {
-    throw new ExportPlanError('缺少随包中文字体，无法烧录字幕。');
+    throw new ExportPlanError(EXPORT_MESSAGES.plan.fontMissingForSubtitles);
   }
 
   const subtitles: ExportSubtitleArtifacts | null =

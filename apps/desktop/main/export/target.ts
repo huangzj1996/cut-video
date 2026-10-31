@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { ExportDefaultTarget } from '../../shared/ipc-contract';
 import { IpcError } from '../ipc-error';
+import { EXPORT_MESSAGES } from './messages';
 
 const EXPORT_DIRECTORY_NAME = '导出';
 // eslint-disable-next-line no-control-regex -- Windows 文件名不允许控制字符。
@@ -67,7 +68,7 @@ export function buildDefaultExportTarget(input: {
     }
   }
 
-  throw new IpcError('EXPORT_TARGET_UNWRITABLE', '导出位置已有过多同名文件，请更换保存位置。');
+  throw new IpcError('EXPORT_TARGET_UNWRITABLE', EXPORT_MESSAGES.targetTooManyDuplicates);
 }
 
 /** 未完成的成品写目标同目录的 .partial 文件；提交时再 rename。 */

@@ -17,6 +17,7 @@ import type { ProjectStore } from '../projects/project-store';
 import { exportTempArtifactsFromPlan } from './artifacts';
 import type { ExportFonts } from './fonts';
 import { startExportJob, type ExportJobHandle } from './job';
+import { EXPORT_MESSAGES } from './messages';
 import { compileExportPlan, ExportPlanError, type ExportPlan } from './plan';
 import { validateExportPreflight, type ExportPreflightDeps } from './preflight';
 import { createEtaEstimator } from './progress';
@@ -157,33 +158,23 @@ export class ExportService {
     const input = this.parseStartInput(rawInput);
 
     if (this.active) {
-      throw new IpcError('EXPORT_ALREADY_RUNNING', '已有导出任务正在进行中。');
+      throw new IpcError('EXPORT_ALREADY_RUNNING', EXPORT_MESSAGES.alreadyRunning);
     }
 
     const project = this.options.getProjectStore().get(input.projectId);
-
-    if (!('ai' in project)) {
-      throw new IpcError('EXPORT_PROJECT_READONLY_OR_DRAFT', '草稿工程不能导出。');
-    }
-
-    const workflowStatus = this.options.getWorkflowStatus(input.projectId);
-
-    if (workflowStatus === 'running' || workflowStatus === 'waiting_user') {
-      throw new IpcError(
-        'EXPORT_PROJECT_READONLY_OR_DRAFT',
-        'AI 工作流正在运行或等待审批，暂不能导出。',
-      );
-    }
-
-    if (project.project.contentRevision !== input.expectedRevision) {
-      throw new IpcError('EXPORT_PROJECT_STALE', '工程内容已更新，请重新打开导出。');
-    }
-
     const targetPath = assertExportTargetPath(input.targetPath);
     const media = this.options.media();
     const fonts = this.options.getExportFonts();
+    // 前置校验是纯函数：草稿/只读/修订过期/能力边界/业务校验都在一处裁决。
     const preflightError = validateExportPreflight(
-      { ffmpegAvailable: media.ffmpegAvailable, fonts, project, targetPath },
+      {
+        expectedRevision: input.expectedRevision,
+        ffmpegAvailable: media.ffmpegAvailable,
+        fonts,
+        project,
+        targetPath,
+        workflowStatus: this.options.getWorkflowStatus(input.projectId),
+      },
       {
         ...this.options.preflightDeps,
         now: this.options.preflightDeps?.now ?? (() => this.now()),
@@ -197,6 +188,11 @@ export class ExportService {
         false,
         preflightError.issues ? { issues: preflightError.issues } : undefined,
       );
+    }
+
+    // preflight 已经拦下草稿工程；这里再窄一次类型，供计划编译器安全使用。
+    if (!('ai' in project)) {
+      throw new IpcError('EXPORT_PROJECT_READONLY_OR_DRAFT', EXPORT_MESSAGES.draftProject);
     }
 
     const runId = randomUUID();
@@ -318,7 +314,7 @@ export class ExportService {
 
       if ('cancelled' in result) {
         this.emitState({
-          error: { code: 'EXPORT_CANCELLED', message: '已取消导出，临时产物已清理。' },
+          error: { code: 'EXPORT_CANCELLED', message: EXPORT_MESSAGES.cancelled },
           phase: result.phase,
           projectId: input.projectId,
           runId: input.runId,
@@ -340,7 +336,7 @@ export class ExportService {
       // 意外异常也要确保渲染进程被请求退出，避免孤儿 ffmpeg。
       job?.cancel();
       this.emitState({
-        error: { code: 'EXPORT_RENDER_FAILED', message: '导出过程异常中止，未提交成品。' },
+        error: { code: 'EXPORT_RENDER_FAILED', message: EXPORT_MESSAGES.unexpectedFailure },
         phase: lastPhase,
         projectId: input.projectId,
         runId: input.runId,

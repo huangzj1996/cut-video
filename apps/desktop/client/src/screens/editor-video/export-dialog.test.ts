@@ -4,6 +4,8 @@ import {
   createExportDialogState,
   EXPORT_CANCELLED_NOTICE,
   exportDialogReducer,
+  exportIssueLocation,
+  exportIssueText,
   exportPhaseLabel,
   isExportDialogLocked,
   type ExportDialogState,
@@ -52,6 +54,45 @@ function startedState(): ExportDialogState {
     type: 'started',
   });
 }
+
+describe('exportIssueLocation', () => {
+  it('locates a capability problem by scene, clip and asset', () => {
+    expect(
+      exportIssueLocation({
+        assetId: 'video-a',
+        clipId: 'clip-1',
+        code: 'EXPORT_UNSUPPORTED_MEDIA',
+        message: '不支持的视频编码。',
+        sceneId: 'scene-1',
+      }),
+    ).toBe('分镜 scene-1 · 片段 clip-1 · 素材 video-a');
+  });
+
+  it('shows the error code, Chinese copy and locator together', () => {
+    expect(
+      exportIssueText({
+        assetId: 'video-a',
+        clipId: 'clip-1',
+        code: 'EXPORT_UNSUPPORTED_MEDIA',
+        message: '不支持的视频编码：hevc。目前仅支持 H.264/AAC 的 MP4/MOV。',
+        sceneId: 'scene-1',
+      }),
+    ).toBe(
+      'EXPORT_UNSUPPORTED_MEDIA：不支持的视频编码：hevc。目前仅支持 H.264/AAC 的 MP4/MOV。（分镜 scene-1 · 片段 clip-1 · 素材 video-a）',
+    );
+  });
+
+  it('falls back to the field path and returns null without any locator', () => {
+    expect(
+      exportIssueLocation({
+        code: 'EXPORT_UNSUPPORTED_TRANSFORM',
+        fieldPath: 'crop',
+        message: '只支持默认裁剪。',
+      }),
+    ).toBe('字段 crop');
+    expect(exportIssueLocation({ code: 'EXPORT_VALIDATION_FAILED', message: '失败。' })).toBeNull();
+  });
+});
 
 describe('export dialog reducer', () => {
   it('starts in the prepare step with the supplied target', () => {

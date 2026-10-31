@@ -1,3 +1,4 @@
+import { EXPORT_CANCELLED_NOTICE } from '../../../../shared/export-copy';
 import type {
   ExportIssue,
   ExportPhase,
@@ -6,13 +7,12 @@ import type {
   IpcErrorCode,
 } from '../../../../shared/ipc-contract';
 
+export { EXPORT_CANCELLED_NOTICE } from '../../../../shared/export-copy';
+
 export type ExportDialogStep = 'failed' | 'prepare' | 'running' | 'succeeded';
 
 /** 取消交互的三态：确认中、正在取消、没有取消交互。 */
 export type ExportCancelStep = 'cancelling' | 'confirming' | 'idle';
-
-/** 取消成功后回到准备态时展示的提示；主进程已清理临时产物，可以立刻重新导出。 */
-export const EXPORT_CANCELLED_NOTICE = '已取消导出，临时产物已清理，可以重新导出。';
 
 export interface ExportDialogError {
   code?: IpcErrorCode;
@@ -70,6 +70,36 @@ export const EXPORT_PHASE_LABELS: Record<ExportPhase, string> = {
 
 export function exportPhaseLabel(phase: ExportPhase): string {
   return EXPORT_PHASE_LABELS[phase] ?? '导出处理中';
+}
+
+/** 失败原因里的问题定位：把分镜/片段/素材/字段拼成一句可读说明。 */
+export function exportIssueLocation(issue: ExportIssue): string | null {
+  const parts: string[] = [];
+
+  if (issue.sceneId !== undefined) {
+    parts.push('分镜 ' + issue.sceneId);
+  }
+
+  if (issue.clipId !== undefined) {
+    parts.push('片段 ' + issue.clipId);
+  }
+
+  if (issue.assetId !== undefined) {
+    parts.push('素材 ' + issue.assetId);
+  }
+
+  if (issue.fieldPath !== undefined) {
+    parts.push('字段 ' + issue.fieldPath);
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/** 失败弹窗里单条问题的完整展示文本：错误码 + 中文文案 + 定位。 */
+export function exportIssueText(issue: ExportIssue): string {
+  const location = exportIssueLocation(issue);
+
+  return `${issue.code}：${issue.message}${location ? `（${location}）` : ''}`;
 }
 
 export function createExportDialogState(projectId = '', targetPath = ''): ExportDialogState {

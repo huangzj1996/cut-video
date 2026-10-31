@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync, statSync, writeFileSyn
 import path from 'node:path';
 import type { ExportErrorInfo, ExportPhase } from '../../shared/ipc-contract';
 import { exportTempArtifactsFromPlan, removeExportTempArtifacts } from './artifacts';
+import { EXPORT_MESSAGES } from './messages';
 import type { ExportPlan } from './plan';
 import { createRenderProgressParser, type RenderProgressSample } from './progress';
 import type { ExportProcessHandle, ExportProcessResult, ExportProcessRunner } from './runner';
@@ -67,7 +68,7 @@ function prepareSubtitleArtifacts(plan: ExportPlan): ExportErrorInfo | null {
   try {
     writeFileSync(plan.subtitles.assPath, plan.subtitles.assText, 'utf8');
   } catch {
-    return { code: 'EXPORT_RENDER_FAILED', message: '无法写入字幕临时产物，导出未开始。' };
+    return { code: 'EXPORT_RENDER_FAILED', message: EXPORT_MESSAGES.subtitleWriteFailed };
   }
 
   try {
@@ -77,7 +78,7 @@ function prepareSubtitleArtifacts(plan: ExportPlan): ExportErrorInfo | null {
       copyFileSync(fontFile, path.join(plan.subtitles.fontsDirPath, path.basename(fontFile)));
     }
   } catch {
-    return { code: 'EXPORT_FONT_MISSING', message: '无法准备随包字幕字体，导出未开始。' };
+    return { code: 'EXPORT_FONT_MISSING', message: EXPORT_MESSAGES.subtitleFontPrepareFailed };
   }
 
   return null;
@@ -186,11 +187,11 @@ export function startExportJob(options: ExportJobOptions): ExportJobHandle {
       const premix = premixOutcome.result;
 
       if (premix.spawnError || premix.exitCode !== 0) {
-        return failure('预混音轨失败，导出未完成。', premix.stderrTail);
+        return failure(EXPORT_MESSAGES.premixFailed, premix.stderrTail);
       }
 
       if (fileSize(plan.premixTemporaryPath) <= 0) {
-        return failure('预混音轨没有产出有效音轨，导出未完成。', premix.stderrTail);
+        return failure(EXPORT_MESSAGES.premixEmpty, premix.stderrTail);
       }
 
       const parser = createRenderProgressParser();
@@ -207,11 +208,11 @@ export function startExportJob(options: ExportJobOptions): ExportJobHandle {
       const render = renderOutcome.result;
 
       if (render.spawnError || render.exitCode !== 0) {
-        return failure('渲染进程失败，导出未完成。', render.stderrTail);
+        return failure(EXPORT_MESSAGES.renderFailed, render.stderrTail);
       }
 
       if (fileSize(plan.temporaryPath) <= 0) {
-        return failure('渲染没有产出有效文件，导出未完成。', render.stderrTail);
+        return failure(EXPORT_MESSAGES.renderEmpty, render.stderrTail);
       }
 
       // 取消可能发生在渲染退出与提交之间；取消永不提交。
@@ -225,7 +226,7 @@ export function startExportJob(options: ExportJobOptions): ExportJobHandle {
       try {
         renameSync(plan.temporaryPath, plan.targetPath);
       } catch {
-        return failure('无法提交导出成品，请检查保存位置。', render.stderrTail);
+        return failure(EXPORT_MESSAGES.commitFailed, render.stderrTail);
       }
 
       return { ok: true, outputPath: plan.targetPath };

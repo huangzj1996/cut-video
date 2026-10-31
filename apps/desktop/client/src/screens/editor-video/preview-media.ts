@@ -7,6 +7,10 @@ import type {
   VoiceAsset,
   VoiceClip,
 } from '@miaoma/video-project';
+import {
+  findVideoCapabilityProblem,
+  type VideoCapabilityProblemKind,
+} from '../../../../shared/video-capabilities';
 
 /**
  * 预览媒体规划：把播放头位置翻译成“当前该播哪个视频/配音/音乐片段，
@@ -14,17 +18,12 @@ import type {
  */
 
 const PLAYABLE_VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4']);
-const PLAYABLE_VIDEO_CODECS = new Set(['avc', 'avc1', 'h264']);
-const PLAYABLE_FORMAT_HINT = '目前仅支持 H.264/AAC 的 MP4/MOV。';
+const PREVIEW_FORMAT_HINT = '目前仅支持 H.264/AAC 的 MP4/MOV。';
 /** 停在 source 末尾时回退一点：避免 video seek 到 duration 变黑，也给音频留出判停余量。 */
 const SOURCE_END_GUARD_SECONDS = 0.001;
 
 export type PreviewIssueKind =
-  | 'missing-asset'
-  | 'unsupported-codec'
-  | 'unsupported-container'
-  | 'unsupported-hdr'
-  | 'unsupported-vfr';
+  'missing-asset' | 'unsupported-container' | VideoCapabilityProblemKind;
 
 export interface PreviewIssue {
   assetId: string;
@@ -202,34 +201,35 @@ export function describeVideoIssue(asset: VideoAsset): PreviewIssue | null {
     return {
       assetId: asset.id,
       kind: 'unsupported-container',
-      message: `不支持的视频容器：${extension || '未知'}。${PLAYABLE_FORMAT_HINT}`,
+      message: `不支持的视频容器：${extension || '未知'}。${PREVIEW_FORMAT_HINT}`,
     };
   }
 
-  const codec = asset.codec?.toLowerCase();
+  const problem = findVideoCapabilityProblem(asset);
 
-  if (codec !== undefined && !PLAYABLE_VIDEO_CODECS.has(codec)) {
-    return {
-      assetId: asset.id,
-      kind: 'unsupported-codec',
-      message: `不支持的视频编码：${asset.codec}。${PLAYABLE_FORMAT_HINT}`,
-    };
+  if (!problem) {
+    return null;
   }
 
-  if (asset.isHdr) {
-    return {
-      assetId: asset.id,
-      kind: 'unsupported-hdr',
-      message: 'HDR 视频暂不支持直接预览，请使用 SDR 素材。',
-    };
-  }
-
-  if (asset.isVfr) {
-    return {
-      assetId: asset.id,
-      kind: 'unsupported-vfr',
-      message: 'VFR（可变帧率）视频暂不支持直接预览，请使用恒定帧率素材。',
-    };
+  switch (problem.kind) {
+    case 'unsupported-codec':
+      return {
+        assetId: asset.id,
+        kind: problem.kind,
+        message: `不支持的视频编码：${problem.codec}。${PREVIEW_FORMAT_HINT}`,
+      };
+    case 'unsupported-hdr':
+      return {
+        assetId: asset.id,
+        kind: problem.kind,
+        message: 'HDR 视频暂不支持直接预览，请使用 SDR 素材。',
+      };
+    case 'unsupported-vfr':
+      return {
+        assetId: asset.id,
+        kind: problem.kind,
+        message: 'VFR（可变帧率）视频暂不支持直接预览，请使用恒定帧率素材。',
+      };
   }
 
   return null;

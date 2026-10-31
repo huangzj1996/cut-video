@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { IPC_CHANNELS, IPC_EVENT_CHANNELS } from './ipc-contract';
+import { EXPORT_ERROR_CODES, IPC_CHANNELS, IPC_EVENT_CHANNELS } from './ipc-contract';
 
 const channels = Object.values(IPC_CHANNELS).flatMap((module) => Object.values(module));
 const eventChannels = Object.values(IPC_EVENT_CHANNELS);
@@ -66,6 +66,27 @@ describe('IPC channel contract', () => {
       'export:reveal',
       'export:start',
     ]);
+  });
+
+  it('declares the complete EXPORT_ error-code namespace', () => {
+    expect([...EXPORT_ERROR_CODES]).toEqual([
+      'EXPORT_ALREADY_RUNNING',
+      'EXPORT_PROJECT_READONLY_OR_DRAFT',
+      'EXPORT_PROJECT_STALE',
+      'EXPORT_VALIDATION_FAILED',
+      'EXPORT_UNSUPPORTED_MEDIA',
+      'EXPORT_UNSUPPORTED_TRANSFORM',
+      'EXPORT_FONT_MISSING',
+      'EXPORT_TARGET_UNWRITABLE',
+      'EXPORT_RENDER_FAILED',
+      'EXPORT_SYNC_CHECK_FAILED',
+      'EXPORT_CANCELLED',
+    ]);
+    expect(new Set(EXPORT_ERROR_CODES).size).toBe(EXPORT_ERROR_CODES.length);
+
+    for (const code of EXPORT_ERROR_CODES) {
+      expect(code).toMatch(/^EXPORT_[A-Z_]+$/);
+    }
   });
 
   it('registers unique push event channels that do not collide with invoke channels', () => {

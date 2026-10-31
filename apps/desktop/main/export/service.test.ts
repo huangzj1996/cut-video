@@ -371,6 +371,49 @@ describe('export service', () => {
     ).rejects.toMatchObject({ code: 'EXPORT_TARGET_UNWRITABLE' });
   });
 
+  it('blocks unsupported media with locatable issues before rendering', async () => {
+    const hevc = seedProject({ videoCodec: 'hevc' });
+    const { service } = createService({ createRunner: successRunner });
+
+    await expect(
+      service.start({
+        expectedRevision: hevc.revision,
+        projectId: hevc.projectId,
+        targetPath: targetPath(),
+      }),
+    ).rejects.toMatchObject({
+      code: 'EXPORT_UNSUPPORTED_MEDIA',
+      details: {
+        issues: expect.arrayContaining([
+          expect.objectContaining({ assetId: 'video-a', clipId: 'clip-1', sceneId: 'scene-1' }),
+        ]),
+      },
+    });
+  });
+
+  it('blocks non-default crop/transform before rendering', async () => {
+    const transformed = seedProject({
+      crop: { height: 1, width: 0.5, x: 0.25, y: 0 },
+      transform: { scale: 1.2, x: 0, y: 0 },
+    });
+    const { service } = createService({ createRunner: successRunner });
+
+    await expect(
+      service.start({
+        expectedRevision: transformed.revision,
+        projectId: transformed.projectId,
+        targetPath: targetPath(),
+      }),
+    ).rejects.toMatchObject({
+      code: 'EXPORT_UNSUPPORTED_TRANSFORM',
+      details: {
+        issues: expect.arrayContaining([
+          expect.objectContaining({ clipId: 'clip-1', sceneId: 'scene-1' }),
+        ]),
+      },
+    });
+  });
+
   it('builds the default target from settings and the project name', () => {
     const { service } = createService();
     const target = service.getDefaultTarget(projectId);

@@ -5,7 +5,9 @@
  * 成功后压入撤销栈并标记 dirty；保存状态由 IPC 结果驱动。
  * 只读（工作流运行/等待审批）与冲突状态下拒绝继续编辑。
  */
-import type { VideoProject, WorkflowRunStatus } from '@miaoma/video-project';
+import type { VideoProject } from '@miaoma/video-project';
+
+export { isWorkflowReadonly as isEditorReadOnly } from '../../../../shared/workflow-status';
 import { applyEdit, type EditAction } from './project-edit';
 import {
   canRedo,
@@ -91,11 +93,6 @@ function withHistory(
     project: nextHistory.present,
     saveStatus: 'idle',
   };
-}
-
-/** 工作流运行或等待审批时编辑器只读；其他状态可编辑。 */
-export function isEditorReadOnly(status: WorkflowRunStatus | null): boolean {
-  return status === 'running' || status === 'waiting_user';
 }
 
 /**

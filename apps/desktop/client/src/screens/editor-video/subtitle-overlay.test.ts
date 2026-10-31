@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SUBTITLE_PRESET_IDS } from '@miaoma/video-project';
 import type { SubtitleClip, SubtitleStyle, VideoProject } from '@miaoma/video-project';
-import { SUBTITLE_PRESET_STYLES, subtitlePresetStyle } from '../subtitle-presets';
+import { SUBTITLE_PRESET_STYLES, subtitlePresetStyle } from '../../../../shared/subtitle-presets';
 import {
   clampSubtitleFontSize,
   resolveSubtitleOverlay,

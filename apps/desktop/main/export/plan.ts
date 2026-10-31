@@ -1,5 +1,8 @@
+import path from 'node:path';
 import type { VideoAsset, VideoClip, VideoProject } from '@miaoma/video-project';
 import { EXPORT_OUTPUT_SPEC, type ExportErrorCode } from '../../shared/ipc-contract';
+import type { ExportFonts } from './fonts';
+import { buildSubtitleDocument, subtitleArtifactFileNames } from './subtitles';
 import { partialPathFor } from './target';
 
 export const OUTPUT_WIDTH = EXPORT_OUTPUT_SPEC.width;
@@ -26,15 +29,35 @@ export interface ExportFfmpegCommand {
   command: string;
 }
 
+/** 字幕烧录需要写进目标目录的临时产物；滤镜参数只引用其中的相对 ASCII 文件名。 */
+export interface ExportSubtitleArtifacts {
+  /** ASS 文件绝对路径。 */
+  assPath: string;
+  /** ASS 文档全文（UTF-8、不带 BOM）。 */
+  assText: string;
+  /** 临时字体目录绝对路径。 */
+  fontsDirPath: string;
+  /** 需要复制进临时字体目录的随包字体文件。 */
+  fontFiles: string[];
+}
+
 export interface ExportPlan {
+  /** 渲染进程工作目录：目标目录，让 ASS/fontsdir 以相对路径解析。 */
+  cwd: string;
   expected: ExportExpectedOutput;
   ffmpeg: ExportFfmpegCommand;
+  /** null 表示这次导出不烧录字幕。 */
+  subtitles: ExportSubtitleArtifacts | null;
   targetPath: string;
   temporaryPath: string;
 }
 
 export interface CompileExportPlanInput {
+  /** 每次导出的唯一标识，用于给临时 ASS/字体目录命名（只允许 ASCII）。 */
+  artifactToken: string;
   ffmpegPath: string;
+  /** 随包字体；缺失时传 null，由前置校验先报 EXPORT_FONT_MISSING。 */
+  fonts: ExportFonts | null;
   project: VideoProject;
   targetPath: string;
 }
@@ -112,7 +135,9 @@ function buildClipFilter(input: {
 /**
  * 导出计划编译器：把时间线换成可执行的 ffmpeg 参数与期望输出规格。
  *
- * 本切片只编译视频轨：裁剪、按 30fps 量化后拼接、缩放到 1920×1080。
+ * 视频轨裁剪、按 30fps 量化后拼接、缩放到 1920×1080；字幕轨可见时在拼接后
+ * 用 ass 滤镜烧录。ASS 与 fontsdir 一律使用相对 ASCII 文件名，进程 cwd 指向
+ * 目标目录（实测中文绝对路径会让滤镜初始化失败）。
  * 时间统一用整数毫秒；每个片段按输出帧边界量化，拼接后总帧数精确可控。
  * 纯函数：不读磁盘、不启动进程。
  */
@@ -165,15 +190,35 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
     throw new ExportPlanError('视频轨未覆盖完整时间线，无法导出。');
   }
 
+  const cwd = path.dirname(targetPath);
+  const subtitleDocument = buildSubtitleDocument(project);
+  const artifactNames = subtitleDocument ? subtitleArtifactFileNames(input.artifactToken) : null;
+
+  if (subtitleDocument && !input.fonts) {
+    throw new ExportPlanError('缺少随包中文字体，无法烧录字幕。');
+  }
+
+  const subtitles: ExportSubtitleArtifacts | null =
+    subtitleDocument && artifactNames
+      ? {
+          assPath: path.join(cwd, artifactNames.assFileName),
+          assText: subtitleDocument,
+          fontsDirPath: path.join(cwd, artifactNames.fontsDirName),
+          fontFiles: input.fonts?.files.slice() ?? [],
+        }
+      : null;
+  const postFilters = ['concat=n=' + clips.length + ':v=1:a=0'];
+
+  if (subtitles && artifactNames) {
+    postFilters.push(
+      'ass=filename=' + artifactNames.assFileName + ':fontsdir=' + artifactNames.fontsDirName,
+    );
+  }
+
+  postFilters.push('format=' + PIXEL_FORMAT);
+
   const graph =
-    filterChains.join(';') +
-    ';' +
-    concatLabels.join('') +
-    'concat=n=' +
-    clips.length +
-    ':v=1:a=0,format=' +
-    PIXEL_FORMAT +
-    '[vout]';
+    filterChains.join(';') + ';' + concatLabels.join('') + postFilters.join(',') + '[vout]';
   const temporaryPath = partialPathFor(targetPath);
   const durationSeconds = (totalFrameCount / OUTPUT_FPS).toFixed(3);
   const args = [
@@ -205,6 +250,7 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
   ];
 
   return {
+    cwd,
     expected: {
       container: EXPORT_OUTPUT_SPEC.container,
       durationMs: Math.round((totalFrameCount / OUTPUT_FPS) * 1000),
@@ -215,6 +261,7 @@ export function compileExportPlan(input: CompileExportPlanInput): ExportPlan {
       width: OUTPUT_WIDTH,
     },
     ffmpeg: { args, command: ffmpegPath },
+    subtitles,
     targetPath,
     temporaryPath,
   };

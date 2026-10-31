@@ -7,7 +7,11 @@ import type { ExportProgress, ExportState } from '../../shared/ipc-contract';
 import { ProjectStore } from '../projects/project-store';
 import type { ExportProcessRunner } from './runner';
 import { ExportService, type ExportServiceOptions } from './service';
-import { createExportFixture, type ExportFixtureOptions } from './test-support/fixture';
+import {
+  createExportFixture,
+  EXPORT_TEST_FONTS,
+  type ExportFixtureOptions,
+} from './test-support/fixture';
 
 let root: string;
 let mediaRoot: string;
@@ -49,6 +53,7 @@ function createService(overrides: Partial<ExportServiceOptions> = {}): {
   const states: ExportState[] = [];
   const progress: ExportProgress[] = [];
   const service = new ExportService({
+    getExportFonts: () => EXPORT_TEST_FONTS,
     getProjectStore: () => store,
     getSettings: () => ({ defaultProjectDirectory: root }),
     getWorkflowStatus: () => null,
@@ -195,6 +200,17 @@ describe('export service', () => {
         targetPath: targetPath(),
       }),
     ).rejects.toMatchObject({ code: 'EXPORT_VALIDATION_FAILED' });
+  });
+
+  it('blocks export when the bundled subtitle font is missing', async () => {
+    const { service } = createService({
+      createRunner: successRunner,
+      getExportFonts: () => null,
+    });
+
+    await expect(
+      service.start({ expectedRevision: revision, projectId, targetPath: targetPath() }),
+    ).rejects.toMatchObject({ code: 'EXPORT_FONT_MISSING' });
   });
 
   it('blocks export when the target directory is not writable', async () => {

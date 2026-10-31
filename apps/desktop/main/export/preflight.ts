@@ -3,6 +3,7 @@ import path from 'node:path';
 import { validateProject } from '@miaoma/video-agent/workflow';
 import type { ValidationIssue, ValidationReport, VideoProject } from '@miaoma/video-project';
 import type { ExportErrorInfo, ExportIssue } from '../../shared/ipc-contract';
+import type { ExportFonts } from './fonts';
 
 const MAX_REPORTED_ISSUES = 20;
 
@@ -14,6 +15,8 @@ export interface ExportPreflightDeps {
 
 export interface ExportPreflightInput {
   ffmpegAvailable: boolean;
+  /** 随包字体；null 表示字体缺失，导出必须先被拦下。 */
+  fonts: ExportFonts | null;
   project: VideoProject;
   targetPath: string;
 }
@@ -48,6 +51,14 @@ export function validateExportPreflight(
 ): ExportErrorInfo | null {
   if (!input.ffmpegAvailable) {
     return { code: 'EXPORT_RENDER_FAILED', message: '未找到 FFmpeg，无法导出。' };
+  }
+
+  // 随包字体是烧录字幕的前提：缺失时明确报错，不让 ffmpeg 静默回退到系统字体。
+  if (!input.fonts || input.fonts.files.length === 0) {
+    return {
+      code: 'EXPORT_FONT_MISSING',
+      message: '缺少随包中文字体，无法烧录字幕，请重新安装完整版本。',
+    };
   }
 
   const directory = path.dirname(input.targetPath);

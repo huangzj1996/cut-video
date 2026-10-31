@@ -4,7 +4,7 @@ import type {
   SubtitleTrack,
   VideoProject,
 } from '@miaoma/video-project';
-import { subtitlePresetStyle } from '../subtitle-presets';
+import { subtitlePresetStyle } from '../../../../shared/subtitle-presets';
 
 /**
  * 预览字幕叠层：把播放头位置翻译成“当前该显示哪条字幕、用什么样式”。

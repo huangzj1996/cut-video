@@ -32,6 +32,7 @@ import {
 import { ChatService } from './chat/chat-service';
 import { ChatStore } from './chat/chat-store';
 import { CloseFlushCoordinator } from './editor/close-flush';
+import { resolveExportFonts } from './export/fonts';
 import { ExportService } from './export/service';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { assertProjectId } from './ipc-args';
@@ -260,6 +261,12 @@ function getExportService(): ExportService {
   }
 
   exportService = new ExportService({
+    getExportFonts: () =>
+      resolveExportFonts({
+        appPath: app.getAppPath(),
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+      }),
     getProjectStore,
     getSettings: () => loadSettings(),
     getWorkflowStatus: (projectId) => getWorkflowRunManager().getState(projectId)?.status ?? null,

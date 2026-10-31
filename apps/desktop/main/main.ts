@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import started from 'electron-squirrel-startup';
 import {
   chat,
@@ -32,6 +32,7 @@ import {
 import { ChatService } from './chat/chat-service';
 import { ChatStore } from './chat/chat-store';
 import { CloseFlushCoordinator } from './editor/close-flush';
+import { ExportService } from './export/service';
 import { IpcError, toIpcErrorPayload } from './ipc-error';
 import { registerAssetProtocol, registerAssetScheme } from './media/asset-protocol-handler';
 import { planAudioSourceRead } from './media/audio-source';
@@ -49,6 +50,8 @@ import { readPublicArtifact } from './workflow/artifact-reader';
 import {
   broadcastChatMessage,
   broadcastChatStream,
+  broadcastExportProgress,
+  broadcastExportState,
   broadcastWorkflowEvent,
 } from './workflow/event-bridge';
 import { desktopPromptProvider } from './workflow/prompts';
@@ -206,6 +209,7 @@ function getMusicLibrary(): Promise<MusicLibraryResult> {
 
 let workflowRunManager: WorkflowRunManager | null = null;
 let chatService: ChatService | null = null;
+let exportService: ExportService | null = null;
 let activeCloseFlush: CloseFlushCoordinator | null = null;
 
 function getWorkflowRunManager(): WorkflowRunManager {
@@ -246,6 +250,28 @@ function getChatService(): ChatService {
   });
 
   return chatService;
+}
+
+/** 导出服务单例：同一时间只允许一个导出任务。 */
+function getExportService(): ExportService {
+  if (exportService) {
+    return exportService;
+  }
+
+  exportService = new ExportService({
+    getProjectStore,
+    getSettings: () => loadSettings(),
+    getWorkflowStatus: (projectId) => getWorkflowRunManager().getState(projectId)?.status ?? null,
+    media: () => {
+      const media = buildMediaInfo();
+
+      return { ffmpegAvailable: media.ffmpegExists, ffmpegPath: media.ffmpegPath };
+    },
+    onProgress: broadcastExportProgress,
+    onState: broadcastExportState,
+  });
+
+  return exportService;
 }
 
 function assertProjectId(value: unknown): string {
@@ -386,6 +412,34 @@ function registerIpcHandlers(): void {
   // 渲染进程完成关闭前的保存后确认；主进程最多等 2 秒。
   handle(IPC_CHANNELS.editor.flushComplete, () => {
     activeCloseFlush?.complete();
+    return null;
+  });
+
+  // 导出（T19）：默认位置、系统保存对话框、启动与“在文件夹中显示”。
+  handle(IPC_CHANNELS.export.defaultTarget, (projectId) =>
+    getExportService().getDefaultTarget(assertProjectId(projectId)),
+  );
+
+  handle(IPC_CHANNELS.export.chooseTarget, async (projectId) => {
+    const id = assertProjectId(projectId);
+    const fallback = getExportService().getDefaultTarget(id);
+    const result = await dialog.showSaveDialog({
+      title: '选择导出位置',
+      buttonLabel: '使用此位置',
+      defaultPath: fallback.path,
+      filters: [{ name: 'MP4 视频', extensions: ['mp4'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+
+    return { path: result.canceled || !result.filePath ? null : result.filePath };
+  });
+
+  handle(IPC_CHANNELS.export.start, (input) => getExportService().start(input));
+
+  handle(IPC_CHANNELS.export.reveal, (runId) => {
+    const outputPath = getExportService().getOutputPath(runId);
+
+    shell.showItemInFolder(outputPath);
     return null;
   });
 

@@ -58,11 +58,22 @@ describe('IPC channel contract', () => {
     ]);
   });
 
+  it('registers the export channels and error code namespace', () => {
+    expect(Object.values(IPC_CHANNELS.export).sort()).toEqual([
+      'export:choose-target',
+      'export:default-target',
+      'export:reveal',
+      'export:start',
+    ]);
+  });
+
   it('registers unique push event channels that do not collide with invoke channels', () => {
     expect(eventChannels.sort()).toEqual([
       'chat:message',
       'chat:stream',
       'editor:flush-request',
+      'export:progress',
+      'export:state',
       'workflow:event',
     ]);
     expect(new Set(eventChannels).size).toBe(eventChannels.length);

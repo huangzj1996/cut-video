@@ -1,0 +1,164 @@
+import type { VideoClip, VideoProject, VoiceClip } from '@miaoma/video-project';
+
+const ISO = '2026-01-01T00:00:00.000Z';
+
+export interface ExportFixtureOptions {
+  audioPath?: string;
+  firstMediaType?: 'image' | 'video';
+  speed?: number;
+  videoPaths?: readonly [string, string];
+}
+
+function videoClip(
+  id: string,
+  assetId: string,
+  startMs: number,
+  endMs: number,
+  sceneId: string,
+  speed?: number,
+): VideoClip {
+  return {
+    assetId,
+    crop: { height: 1, width: 1, x: 0, y: 0 },
+    endMs,
+    id,
+    kind: 'video',
+    sceneId,
+    sourceEndMs: endMs - startMs,
+    sourceStartMs: 0,
+    startMs,
+    ...(speed !== undefined ? { speed } : {}),
+    transform: { scale: 1, x: 0, y: 0 },
+  };
+}
+
+function voiceClip(id: string, startMs: number, endMs: number, sceneId: string): VoiceClip {
+  return {
+    assetId: 'voice-a',
+    endMs,
+    id,
+    kind: 'voice',
+    sceneId,
+    startMs,
+    voicePreset: 'wenrou-xuejie',
+  };
+}
+
+/** 两段各 1 秒的夹具工程：视频轨、配音轨都覆盖完整时间线，可过业务校验。 */
+export function createExportFixture(options: ExportFixtureOptions = {}): VideoProject {
+  const [firstPath, secondPath] = options.videoPaths ?? ['C:/media/a.mp4', 'C:/media/b.mp4'];
+  const audioPath = options.audioPath ?? 'C:/media/voice.m4a';
+  const firstType = options.firstMediaType ?? 'video';
+
+  return {
+    ai: {
+      completedAt: ISO,
+      inputFingerprint: 'fixture',
+      model: 'fixture-model',
+      modelConfigVersion: '1',
+      provider: 'fixture',
+      runId: 'run-1',
+      startedAt: ISO,
+    },
+    assets: {
+      music: [],
+      subtitles: [],
+      thumbnails: [],
+      videos: [
+        {
+          ...(firstType === 'video' ? { fps: 30 } : {}),
+          durationMs: 5_000,
+          height: 1080,
+          id: 'video-a',
+          mediaType: firstType,
+          path: firstPath,
+          thumbnailIds: [],
+          width: 1920,
+        },
+        {
+          durationMs: 5_000,
+          fps: 30,
+          height: 1080,
+          id: 'video-b',
+          mediaType: 'video',
+          path: secondPath,
+          thumbnailIds: [],
+          width: 1920,
+        },
+      ],
+      voices: [
+        {
+          durationMs: 2_000,
+          id: 'voice-a',
+          isMock: true,
+          path: audioPath,
+          provider: 'fixture',
+          voice: 'fixture',
+        },
+      ],
+    },
+    canvas: { aspectRatio: '16:9', fps: 30, height: 1080, width: 1920 },
+    project: {
+      contentRevision: 1,
+      createdAt: ISO,
+      name: '夹具工程',
+      projectId: 'project-fixture',
+      updatedAt: ISO,
+    },
+    render: {
+      audioBitrateKbps: 192,
+      audioCodec: 'aac',
+      burnSubtitles: true,
+      container: 'mp4',
+      sourceAudioMuted: true,
+      videoCodec: 'h264',
+    },
+    scenes: [
+      {
+        durationMs: 1_000,
+        goal: '开场',
+        id: 'scene-1',
+        index: 1,
+        matchedVideoAssetIds: ['video-a'],
+        notes: '',
+        script: '第一段',
+        subtitleIds: [],
+        title: '开场',
+        visualIntent: '画面',
+        voiceAssetId: 'voice-a',
+      },
+      {
+        durationMs: 1_000,
+        goal: '主体',
+        id: 'scene-2',
+        index: 2,
+        matchedVideoAssetIds: ['video-b'],
+        notes: '',
+        script: '第二段',
+        subtitleIds: [],
+        title: '主体',
+        visualIntent: '画面',
+        voiceAssetId: 'voice-a',
+      },
+    ],
+    schemaVersion: '1.0.0',
+    tracks: [
+      {
+        clips: [
+          videoClip('clip-1', 'video-a', 0, 1_000, 'scene-1', options.speed),
+          videoClip('clip-2', 'video-b', 1_000, 2_000, 'scene-2', options.speed),
+        ],
+        id: 'track-video',
+        kind: 'video',
+      },
+      {
+        clips: [
+          voiceClip('voice-1', 0, 1_000, 'scene-1'),
+          voiceClip('voice-2', 1_000, 2_000, 'scene-2'),
+        ],
+        id: 'track-voice',
+        kind: 'voice',
+      },
+    ],
+  };
+}

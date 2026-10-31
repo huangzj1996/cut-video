@@ -63,6 +63,82 @@ export interface MediaReadAudioResult {
  * 应用内置本地音乐库的曲目。不可用条目也会返回，让 UI 能逐条禁用并给出原因，
  * 而不是整库失败；`durationMs` 不可用时为 null。
  */
+/**
+ * 导出（T19）的公开契约。
+ */
+export type ExportPhase =
+  'preparing' | 'validating' | 'mixing' | 'rendering' | 'verifying' | 'committing';
+
+export type ExportErrorCode =
+  | 'EXPORT_ALREADY_RUNNING'
+  | 'EXPORT_PROJECT_READONLY_OR_DRAFT'
+  | 'EXPORT_PROJECT_STALE'
+  | 'EXPORT_VALIDATION_FAILED'
+  | 'EXPORT_UNSUPPORTED_MEDIA'
+  | 'EXPORT_UNSUPPORTED_TRANSFORM'
+  | 'EXPORT_FONT_MISSING'
+  | 'EXPORT_TARGET_UNWRITABLE'
+  | 'EXPORT_RENDER_FAILED'
+  | 'EXPORT_SYNC_CHECK_FAILED'
+  | 'EXPORT_CANCELLED';
+
+export interface ExportIssue {
+  assetId?: string;
+  clipId?: string;
+  code: string;
+  fieldPath?: string;
+  message: string;
+  sceneId?: string;
+}
+
+export interface ExportErrorInfo {
+  code: ExportErrorCode;
+  detail?: string;
+  issues?: ExportIssue[];
+  message: string;
+}
+
+export interface ExportProgress {
+  elapsedMs: number;
+  etaMs: number | null;
+  percent: number | null;
+  phase: ExportPhase;
+  renderedMediaMs: number | null;
+  runId: string;
+  speed: number | null;
+}
+
+export interface ExportState {
+  error?: ExportErrorInfo;
+  outputPath?: string;
+  phase: ExportPhase;
+  projectId: string;
+  runId: string;
+  status: 'failed' | 'running' | 'succeeded';
+  targetPath: string;
+}
+
+export interface ExportStartInput {
+  expectedRevision: number;
+  projectId: string;
+  targetPath: string;
+}
+
+export interface ExportStartResult {
+  runId: string;
+  targetPath: string;
+}
+
+export interface ExportDefaultTarget {
+  directory: string;
+  fileName: string;
+  path: string;
+}
+
+export interface ExportTargetSelection {
+  path: string | null;
+}
+
 export interface MusicLibraryTrack {
   available: boolean;
   description?: string;
@@ -201,6 +277,8 @@ export interface IpcEventContract {
   'chat:message': ChatMessage;
   'chat:stream': ChatStreamEvent;
   'editor:flush-request': null;
+  'export:progress': ExportProgress;
+  'export:state': ExportState;
   'workflow:event': RunEvent;
 }
 
@@ -249,7 +327,8 @@ export type IpcErrorCode =
   | 'CHAT_APPROVAL_NOT_FOUND'
   | 'CHAT_LOG_INVALID'
   | 'CHAT_LOG_TOO_LARGE'
-  | 'CHAT_WRITE_FAILED';
+  | 'CHAT_WRITE_FAILED'
+  | ExportErrorCode;
 
 export interface IpcErrorPayload {
   code: IpcErrorCode;
@@ -361,6 +440,22 @@ export interface IpcInvokeContract {
     params: [input: WorkflowArtifactInput];
     result: WorkflowArtifactPayload;
   };
+  'export:default-target': {
+    params: [projectId: string];
+    result: ExportDefaultTarget;
+  };
+  'export:choose-target': {
+    params: [projectId: string];
+    result: ExportTargetSelection;
+  };
+  'export:start': {
+    params: [input: ExportStartInput];
+    result: ExportStartResult;
+  };
+  'export:reveal': {
+    params: [runId: string];
+    result: null;
+  };
 }
 
 export type IpcChannel = keyof IpcInvokeContract;
@@ -404,6 +499,12 @@ export const IPC_CHANNELS = {
   editor: {
     flushComplete: 'editor:flush-complete' satisfies IpcChannel,
   },
+  export: {
+    chooseTarget: 'export:choose-target' satisfies IpcChannel,
+    defaultTarget: 'export:default-target' satisfies IpcChannel,
+    reveal: 'export:reveal' satisfies IpcChannel,
+    start: 'export:start' satisfies IpcChannel,
+  },
   chat: {
     list: 'chat:list' satisfies IpcChannel,
     retry: 'chat:retry' satisfies IpcChannel,
@@ -422,6 +523,8 @@ export const IPC_EVENT_CHANNELS = {
   chatMessage: 'chat:message' satisfies IpcEventChannel,
   chatStream: 'chat:stream' satisfies IpcEventChannel,
   editorFlushRequest: 'editor:flush-request' satisfies IpcEventChannel,
+  exportProgress: 'export:progress' satisfies IpcEventChannel,
+  exportState: 'export:state' satisfies IpcEventChannel,
   workflowEvent: 'workflow:event' satisfies IpcEventChannel,
 } as const;
 
@@ -468,6 +571,16 @@ export interface MiaomaWorkflowApi {
   onEvent(listener: (event: RunEvent) => void): () => void;
 }
 
+/** 导出任务：发起、选择目标、订阅状态；渲染进程不直接启动进程。 */
+export interface MiaomaExportApi {
+  getDefaultTarget(projectId: string): Promise<IpcResponse<IpcResult<'export:default-target'>>>;
+  chooseTarget(projectId: string): Promise<IpcResponse<IpcResult<'export:choose-target'>>>;
+  start(input: ExportStartInput): Promise<IpcResponse<IpcResult<'export:start'>>>;
+  reveal(runId: string): Promise<IpcResponse<IpcResult<'export:reveal'>>>;
+  onProgress(listener: (event: ExportProgress) => void): () => void;
+  onState(listener: (state: ExportState) => void): () => void;
+}
+
 /** 关闭窗口前的 flush 握手：主进程请求，渲染进程保存完成后确认。 */
 export interface MiaomaEditorApi {
   onFlushRequest(listener: () => void): () => void;
@@ -486,4 +599,5 @@ export interface MiaomaApi {
   chat: MiaomaChatApi;
   workflow: MiaomaWorkflowApi;
   editor: MiaomaEditorApi;
+  export: MiaomaExportApi;
 }

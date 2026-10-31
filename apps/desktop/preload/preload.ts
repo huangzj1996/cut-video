@@ -75,6 +75,14 @@ const api: MiaomaApi = {
     completeFlush: () => invoke(IPC_CHANNELS.editor.flushComplete),
     onFlushRequest: (listener) => subscribe(IPC_EVENT_CHANNELS.editorFlushRequest, listener),
   },
+  export: {
+    getDefaultTarget: (projectId) => invoke(IPC_CHANNELS.export.defaultTarget, projectId),
+    chooseTarget: (projectId) => invoke(IPC_CHANNELS.export.chooseTarget, projectId),
+    start: (input) => invoke(IPC_CHANNELS.export.start, input),
+    reveal: (runId) => invoke(IPC_CHANNELS.export.reveal, runId),
+    onProgress: (listener) => subscribe(IPC_EVENT_CHANNELS.exportProgress, listener),
+    onState: (listener) => subscribe(IPC_EVENT_CHANNELS.exportState, listener),
+  },
 };
 
 contextBridge.exposeInMainWorld('miaoma', api);

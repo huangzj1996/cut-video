@@ -1,6 +1,10 @@
 import { BrowserWindow } from 'electron';
 import type { ChatMessage, ChatStreamEvent, RunEvent } from '@miaoma/video-project';
-import { IPC_EVENT_CHANNELS } from '../../shared/ipc-contract';
+import {
+  IPC_EVENT_CHANNELS,
+  type ExportProgress,
+  type ExportState,
+} from '../../shared/ipc-contract';
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -20,4 +24,12 @@ export function broadcastChatMessage(message: ChatMessage): void {
 
 export function broadcastChatStream(event: ChatStreamEvent): void {
   broadcast(IPC_EVENT_CHANNELS.chatStream, event);
+}
+
+export function broadcastExportState(state: ExportState): void {
+  broadcast(IPC_EVENT_CHANNELS.exportState, state);
+}
+
+export function broadcastExportProgress(progress: ExportProgress): void {
+  broadcast(IPC_EVENT_CHANNELS.exportProgress, progress);
 }

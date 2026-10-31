@@ -23,6 +23,7 @@ import {
 } from './editor-video/editor-session';
 import { describeReadonlyBanner, describeSaveStatus } from './editor-video/editor-status';
 import { EditorEmpty, EditorLoading, EditorUnavailable } from './editor-video/EditorStates';
+import { ExportDialog } from './editor-video/ExportDialog';
 import {
   loadEditorProject,
   buildEditorProjectView,
@@ -297,6 +298,7 @@ function EditorWorkspace({
   const [zoom, setZoom] = useState(1);
   const [waveformsVisible, setWaveformsVisible] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [draggingSceneId, setDraggingSceneId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -310,6 +312,7 @@ function EditorWorkspace({
   const noticeTimer = useRef<number | null>(null);
   const sessionRef = useRef<EditorSessionState>(session);
   const autosaveRef = useRef<AutosaveController | null>(null);
+  const savedRevisionRef = useRef(project.project.contentRevision);
   const editSeqRef = useRef(session.editSeq);
   const suppressClickRef = useRef(false);
   const trimRef = useRef<{
@@ -470,6 +473,7 @@ function EditorWorkspace({
       }
 
       sessionDispatch({ project: response.data, savedSeq: current.editSeq, type: 'save-success' });
+      savedRevisionRef.current = response.data.project.contentRevision;
       return;
     }
 
@@ -619,6 +623,22 @@ function EditorWorkspace({
     };
   }, []);
 
+  /**
+   * 导出前自动保存：先用自动保存 flush 写盘，失败就不允许导出。
+   * 修订号取自最近一次成功保存的工程，避免 React 状态尚未刷新时读到旧修订。
+   */
+  const saveBeforeExport = useCallback(async (): Promise<number> => {
+    const controller = autosaveRef.current;
+
+    await controller?.flush();
+
+    if (controller?.hasUnsavedEdits) {
+      throw new Error('自动保存失败，导出已阻止。');
+    }
+
+    return savedRevisionRef.current;
+  }, []);
+
   const reloadProject = useCallback(async () => {
     const reader = window.miaoma?.project;
 
@@ -634,6 +654,7 @@ function EditorWorkspace({
     }
 
     sessionDispatch({ project: response.data, type: 'reload' });
+    savedRevisionRef.current = response.data.project.contentRevision;
     autosaveRef.current?.resume();
     notify('已重新加载最新工程。');
   }, [notify]);
@@ -1521,7 +1542,15 @@ function EditorWorkspace({
           <button
             className="ed-export"
             type="button"
-            onClick={() => notify('渲染导出将在 T19 实现。')}
+            disabled={session.readonly || exportOpen}
+            title={
+              session.readonly
+                ? '编辑器只读，暂不能导出'
+                : exportOpen
+                  ? '导出进行中'
+                  : '渲染并导出为 MP4'
+            }
+            onClick={() => setExportOpen(true)}
           >
             <EditorIcon name="export" size={15} />
             渲染导出
@@ -1986,6 +2015,13 @@ function EditorWorkspace({
           </div>
         </div>
       </section>
+
+      <ExportDialog
+        beforeStart={saveBeforeExport}
+        onClose={() => setExportOpen(false)}
+        open={exportOpen}
+        projectId={view.projectId}
+      />
 
       {notice ? (
         <div className="ed-toast" role="status">
